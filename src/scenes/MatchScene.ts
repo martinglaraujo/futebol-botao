@@ -379,24 +379,18 @@ export class MatchScene extends Phaser.Scene {
     const topLine = FIELD.MARGIN;
     const bottomLine = GAME.HEIGHT - FIELD.MARGIN;
 
-    // Passou da linha esquerda (gol do home)
-    if (x <= leftLine + PHYSICS.BALL_RADIUS) {
-      if (inGoalBand && x <= leftLine) this.onGoal('away'); // gol contra o mandante
-      else if (x < leftLine - 4) this.deadBallOnGoalLine('home', y); // fora, sem ser gol
-      return;
-    }
-    // Passou da linha direita (gol do away)
-    if (x >= rightLine - PHYSICS.BALL_RADIUS) {
-      if (inGoalBand && x >= rightLine) this.onGoal('home');
-      else if (x > rightLine + 4) this.deadBallOnGoalLine('away', y);
-      return;
-    }
+    // Gol: só dentro da faixa da trave.
+    if (inGoalBand && x <= leftLine) return this.onGoal('away'); // gol contra o mandante
+    if (inGoalBand && x >= rightLine) return this.onGoal('home');
+
+    // Saiu pela linha de fundo fora da faixa da trave → escanteio/tiro de meta.
+    // (Checado ANTES da lateral pra não perder o caso de saída bem no canto.)
+    if (!inGoalBand && x <= leftLine + PHYSICS.BALL_RADIUS) return this.deadBallOnGoalLine('home', y);
+    if (!inGoalBand && x >= rightLine - PHYSICS.BALL_RADIUS) return this.deadBallOnGoalLine('away', y);
+
     // FORA pela lateral (topo/base) → tiro de lateral no ponto onde saiu.
-    if (y <= topLine + PHYSICS.BALL_RADIUS) {
-      this.throwInSide(x, topLine + PHYSICS.BALL_RADIUS + 2);
-    } else if (y >= bottomLine - PHYSICS.BALL_RADIUS) {
-      this.throwInSide(x, bottomLine - PHYSICS.BALL_RADIUS - 2);
-    }
+    if (y <= topLine + PHYSICS.BALL_RADIUS) return this.throwInSide(x, topLine + PHYSICS.BALL_RADIUS + 2);
+    if (y >= bottomLine - PHYSICS.BALL_RADIUS) return this.throwInSide(x, bottomLine - PHYSICS.BALL_RADIUS - 2);
   }
 
   /**
