@@ -207,13 +207,13 @@ export class MatchScene extends Phaser.Scene {
   }
 
   /**
-   * Desenha o banco de reservas na margem (fora das linhas), sem física.
-   * Cada time fica no seu próprio lado do campo (home à esquerda, away à
-   * direita) — assim o vão central do topo sobra livre para o Scoreboard.
+   * Desenha o banco de reservas na margem inferior, sem física. Cada time
+   * fica no seu próprio lado do campo (home à esquerda, away à direita) —
+   * assim o topo inteiro sobra livre para o Scoreboard e a FormationBar.
    */
   private drawBench(side: TeamSide, bench: Player[], buttonColor: number): void {
     this.benchGfx[side]?.destroy();
-    const y = side === 'home' ? GAME.HEIGHT - 26 : 26;
+    const y = GAME.HEIGHT - 26;
     const centerX = side === 'home' ? GAME.WIDTH * 0.25 : GAME.WIDTH * 0.75;
     const startX = centerX - ((bench.length - 1) * 30) / 2;
     const items: Phaser.GameObjects.GameObject[] = [];
