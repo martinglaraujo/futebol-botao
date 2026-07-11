@@ -40,12 +40,23 @@ export class MatchScene extends Phaser.Scene {
   };
   private formationBar!: FormationBar;
   private scoreboard!: Scoreboard;
+  /** Último lado a tocar a bola — decide escanteio (defensor) vs. tiro de meta (atacante). */
+  private lastToucherSide: TeamSide | null = null;
+  private remainingSeconds = RULES.MATCH_MINUTES * 60;
+  private matchOver = false;
+  private half: 1 | 2 = 1;
+  private clockRunning = false;
 
   constructor() {
     super('MatchScene');
   }
 
   create(): void {
+    // A cena é reutilizada pelo scene.restart() (mesma instância) — os
+    // campos abaixo têm inicializadores de classe que só rodam uma vez, na
+    // primeira construção, então precisam ser resetados aqui manualmente.
+    this.resetState();
+
     const [home, away] = seedTeams();
     this.homeTeam = home;
     this.awayTeam = away;
@@ -59,6 +70,7 @@ export class MatchScene extends Phaser.Scene {
     this.spawnBall();
     this.spawnTeam(home, 'home');
     this.spawnTeam(away, 'away');
+    this.trackLastToucher();
 
     // Só o time humano da vez pode ser petelecado; e só quando tudo está parado.
     this.flick = new FlickController(
@@ -78,11 +90,57 @@ export class MatchScene extends Phaser.Scene {
       this.formationId[side] = id;
       this.rebuildTeam(side);
     });
-    this.scoreboard = new Scoreboard(home.shortName, away.shortName);
+    this.scoreboard = new Scoreboard(home.shortName, away.shortName, () => this.scene.restart());
+    this.scoreboard.updateTime(this.remainingSeconds, this.half);
+    this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickClock() });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.formationBar.destroy();
       this.scoreboard.destroy();
     });
+  }
+
+  /** Reseta todo o estado mutável — necessário porque scene.restart() reaproveita a instância. */
+  private resetState(): void {
+    this.buttons = [];
+    this.turn = 'home';
+    this.detailed = false;
+    this.score = { home: 0, away: 0 };
+    this.formationId = { home: DEFAULT_FORMATION_ID, away: DEFAULT_FORMATION_ID };
+    this.benchGfx = { home: null, away: null };
+    this.lastToucherSide = null;
+    this.remainingSeconds = RULES.MATCH_MINUTES * 60;
+    this.matchOver = false;
+    this.half = 1;
+    this.clockRunning = false;
+    this.awaitingRest = false;
+    this.awaitingRestSince = 0;
+    this.ballDeadFrames = 0;
+  }
+
+  /** Cronômetro regressivo — só corre depois do chute inicial de cada tempo. */
+  private tickClock(): void {
+    if (this.matchOver || !this.clockRunning) return;
+    this.remainingSeconds = Math.max(0, this.remainingSeconds - 1);
+    this.scoreboard.updateTime(this.remainingSeconds, this.half);
+    if (this.remainingSeconds === 0) {
+      if (this.half === 1) this.startSecondHalf();
+      else this.endMatch();
+    }
+  }
+
+  /** Fim do 1º tempo: reposiciona os times, zera o relógio pro 2º e pausa até o próximo peteleco. */
+  private startSecondHalf(): void {
+    this.half = 2;
+    this.remainingSeconds = RULES.MATCH_MINUTES * 60;
+    this.clockRunning = false;
+    this.resetKickoff();
+    this.scoreboard.showHalftime();
+  }
+
+  private endMatch(): void {
+    this.matchOver = true;
+    this.flick.enabled = false;
+    this.scoreboard.showFullTime();
   }
 
   // ---------- Construção do campo ----------
@@ -151,6 +209,19 @@ export class MatchScene extends Phaser.Scene {
       mass: PHYSICS.BALL_MASS,
     }) as MatterJS.BodyType;
     this.ballGfx = this.add.circle(GAME.WIDTH / 2, GAME.HEIGHT / 2, PHYSICS.BALL_RADIUS, 0xffffff).setDepth(20);
+  }
+
+  /** Registra qual lado tocou a bola por último (decide escanteio vs. tiro de meta). */
+  private trackLastToucher(): void {
+    this.matter.world.on('collisionstart', (event: MatterJS.IEventCollision<MatterJS.Engine>) => {
+      for (const pair of event.pairs) {
+        const bodyA = pair.bodyA as MatterJS.BodyType;
+        const bodyB = pair.bodyB as MatterJS.BodyType;
+        const other = bodyA.label === 'ball' ? bodyB : bodyB.label === 'ball' ? bodyA : null;
+        if (!other || !other.label.startsWith('button:')) continue;
+        this.lastToucherSide = other.label.split(':')[1] as TeamSide;
+      }
+    });
   }
 
   /** Escolhe os titulares para as vagas do esquema; o resto vira banco. */
@@ -251,9 +322,26 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private onFlickResolved(): void {
+    // O relógio só começa a correr no primeiro peteleco de cada tempo (o
+    // chute inicial) — antes disso fica parado em 05:00.
+    if (!this.clockRunning) {
+      this.clockRunning = true;
+      this.scoreboard.updateTime(this.remainingSeconds, this.half);
+    }
     // O turno alterna assim que o movimento cessar (checado no update()).
     this.awaitingRest = true;
+    this.awaitingRestSince = this.time.now;
     this.flick.enabled = false;
+  }
+
+  /** Zera velocidades de bola e botões — usado pela trava de SETTLE_TIMEOUT_MS. */
+  private forceStopAll(): void {
+    this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
+    this.matter.body.setAngularVelocity(this.ball, 0);
+    for (const b of this.buttons) {
+      this.matter.body.setVelocity(b.body, { x: 0, y: 0 });
+      this.matter.body.setAngularVelocity(b.body, 0);
+    }
   }
 
   /** Centro do gol adversário do lado informado (para onde a IA mira). */
@@ -268,11 +356,14 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private awaitingRest = false;
+  private awaitingRestSince = 0;
 
   /**
    * Detecção de gol/saída POR POSIÇÃO (chamado todo frame).
    * - Cruzou a linha de fundo dentro das traves  → GOL.
-   * - Cruzou a linha em qualquer outro ponto/ficou presa fora → volta ao jogo.
+   * - Cruzou a linha de fundo fora das traves     → escanteio (defensor tocou
+   *   por último) ou tiro de meta (atacante tocou por último).
+   * - Cruzou a lateral (topo/base do campo)       → FORA, tiro de lateral.
    * Um cooldown evita disparar duas vezes durante o reset.
    */
   private checkBall(): void {
@@ -285,24 +376,61 @@ export class MatchScene extends Phaser.Scene {
     const inGoalBand = Math.abs(y - cy) <= FIELD.GOAL_WIDTH / 2;
     const leftLine = FIELD.MARGIN;
     const rightLine = GAME.WIDTH - FIELD.MARGIN;
+    const topLine = FIELD.MARGIN;
+    const bottomLine = GAME.HEIGHT - FIELD.MARGIN;
 
-    // Passou da linha esquerda
+    // Passou da linha esquerda (gol do home)
     if (x <= leftLine + PHYSICS.BALL_RADIUS) {
       if (inGoalBand && x <= leftLine) this.onGoal('away'); // gol contra o mandante
-      else if (x < leftLine - 4) this.throwBackIn(y); // encalhou fora → devolve
+      else if (x < leftLine - 4) this.deadBallOnGoalLine('home', y); // fora, sem ser gol
       return;
     }
-    // Passou da linha direita
+    // Passou da linha direita (gol do away)
     if (x >= rightLine - PHYSICS.BALL_RADIUS) {
       if (inGoalBand && x >= rightLine) this.onGoal('home');
-      else if (x > rightLine + 4) this.throwBackIn(y);
+      else if (x > rightLine + 4) this.deadBallOnGoalLine('away', y);
+      return;
+    }
+    // FORA pela lateral (topo/base) → tiro de lateral no ponto onde saiu.
+    if (y <= topLine + PHYSICS.BALL_RADIUS) {
+      this.throwInSide(x, topLine + PHYSICS.BALL_RADIUS + 2);
+    } else if (y >= bottomLine - PHYSICS.BALL_RADIUS) {
+      this.throwInSide(x, bottomLine - PHYSICS.BALL_RADIUS - 2);
     }
   }
 
-  /** Recoloca a bola em jogo (tiro de lateral simplificado ao centro). */
-  private throwBackIn(y: number): void {
-    const clampedY = Phaser.Math.Clamp(y, FIELD.MARGIN + 60, GAME.HEIGHT - FIELD.MARGIN - 60);
-    this.matter.body.setPosition(this.ball, { x: GAME.WIDTH / 2, y: clampedY });
+  /**
+   * Bola saiu pela linha de fundo sem ser gol.
+   * - Último toque foi do time que defende essa linha → ESCANTEIO (a bola
+   *   voltou pra ele mesmo, então foi ele quem mandou pra fora): pro atacante,
+   *   no canto mais próximo de onde saiu.
+   * - Último toque foi do atacante (chute foi longe/pra fora) → TIRO DE META:
+   *   devolve pro defensor, perto do próprio gol.
+   */
+  private deadBallOnGoalLine(defendingSide: TeamSide, y: number): void {
+    const isLeft = defendingSide === 'home';
+    const goalLineX = isLeft ? FIELD.MARGIN : GAME.WIDTH - FIELD.MARGIN;
+    const inward = isLeft ? 1 : -1;
+    const cy = GAME.HEIGHT / 2;
+
+    let pos: { x: number; y: number };
+    if (this.lastToucherSide === defendingSide) {
+      const cornerY = y < cy ? FIELD.MARGIN + 14 : GAME.HEIGHT - FIELD.MARGIN - 14;
+      pos = { x: goalLineX + inward * 14, y: cornerY }; // escanteio
+    } else {
+      pos = { x: goalLineX + inward * 70, y: cy }; // tiro de meta
+    }
+
+    this.matter.body.setPosition(this.ball, pos);
+    this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
+    this.matter.body.setAngularVelocity(this.ball, 0);
+    this.ballDeadFrames = 6;
+  }
+
+  /** FORA: bola saiu pela lateral (topo/base) — reposiciona no ponto de saída (tiro de lateral). */
+  private throwInSide(x: number, y: number): void {
+    const clampedX = Phaser.Math.Clamp(x, FIELD.MARGIN + 20, GAME.WIDTH - FIELD.MARGIN - 20);
+    this.matter.body.setPosition(this.ball, { x: clampedX, y });
     this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
@@ -312,18 +440,22 @@ export class MatchScene extends Phaser.Scene {
 
   private onGoal(scorer: TeamSide): void {
     this.score[scorer] += 1;
-    this.scoreboard.update(this.score.home, this.score.away);
-    // TODO: zoom-in de comemoração + hino + reset de posições.
+    this.scoreboard.updateScore(this.score.home, this.score.away);
+    // TODO: zoom-in de comemoração + hino.
     this.cameras.main.flash(300, 255, 255, 255);
     this.resetKickoff();
     console.log(`[GOL] ${this.homeTeam.shortName} ${this.score.home} x ${this.score.away} ${this.awayTeam.shortName}`);
   }
 
+  /** Devolve bola E botões às posições de chute inicial (formação atual). */
   private resetKickoff(): void {
+    this.rebuildTeam('home');
+    this.rebuildTeam('away');
     this.matter.body.setPosition(this.ball, { x: GAME.WIDTH / 2, y: GAME.HEIGHT / 2 });
     this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
+    this.lastToucherSide = null;
   }
 
   // ---------- LOD / Zoom (perspectiva dinâmica) ----------
@@ -350,8 +482,13 @@ export class MatchScene extends Phaser.Scene {
     this.checkBall();
     this.updateLOD();
 
-    // Fim do movimento → passa o turno e reabilita o peteleco.
-    if (this.awaitingRest && this.everythingStopped()) {
+    if (this.matchOver) return;
+
+    // Fim do movimento → passa o turno e reabilita o peteleco. Se a física
+    // nunca convergir (oscilação residual), a trava de tempo força a parada.
+    const settledByTimeout = this.time.now - this.awaitingRestSince > PHYSICS.SETTLE_TIMEOUT_MS;
+    if (this.awaitingRest && (this.everythingStopped() || settledByTimeout)) {
+      if (settledByTimeout) this.forceStopAll();
       this.awaitingRest = false;
       this.turn = this.turn === 'home' ? 'away' : 'home';
       if (this.turn === RULES.CPU_SIDE) {

@@ -1,10 +1,12 @@
 import { FORMATIONS, DEFAULT_FORMATION_ID } from '@/data/formations';
-import type { TeamSide } from '@/config/constants';
+import { RULES, type TeamSide } from '@/config/constants';
 
 /**
  * Barra de seleção de ESQUEMA TÁTICO (DOM overlay sobre o canvas).
- * Um dropdown por time. Ao trocar, dispara onChange(side, formationId),
- * que faz a MatchScene re-montar os titulares e o banco.
+ * Só o lado humano (não-RULES.CPU_SIDE) recebe um dropdown editável — o
+ * esquema do adversário é decisão da IA, não do jogador, e aparece como
+ * texto fixo. Ao trocar, dispara onChange(side, formationId), que faz a
+ * MatchScene re-montar os titulares e o banco.
  */
 export class FormationBar {
   private root: HTMLDivElement;
@@ -31,9 +33,38 @@ export class FormationBar {
       zIndex: '10',
     });
 
-    this.root.appendChild(this.buildSelect(homeName, 'home'));
-    this.root.appendChild(this.buildSelect(awayName, 'away'));
+    this.root.appendChild(this.buildEntry(homeName, 'home'));
+    this.root.appendChild(this.buildEntry(awayName, 'away'));
     document.body.appendChild(this.root);
+  }
+
+  private buildEntry(teamName: string, side: TeamSide): HTMLElement {
+    return side === RULES.CPU_SIDE ? this.buildReadOnly(teamName) : this.buildSelect(teamName, side);
+  }
+
+  /** Lado da CPU: mostra o esquema atual sem permitir edição pelo jogador. */
+  private buildReadOnly(teamName: string): HTMLElement {
+    const wrap = document.createElement('div');
+    Object.assign(wrap.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      background: 'rgba(0,0,0,0.45)',
+      padding: '4px 8px',
+      borderRadius: '8px',
+      backdropFilter: 'blur(2px)',
+    });
+
+    const label = document.createElement('span');
+    label.textContent = teamName;
+    label.style.fontWeight = '700';
+
+    const formation = document.createElement('span');
+    formation.textContent = FORMATIONS.find((f) => f.id === DEFAULT_FORMATION_ID)?.name ?? '';
+    formation.style.opacity = '0.75';
+
+    wrap.append(label, formation);
+    return wrap;
   }
 
   private buildSelect(teamName: string, side: TeamSide): HTMLElement {

@@ -48,6 +48,11 @@ export const PHYSICS = {
 
   // Considera o botão "parado" abaixo desta velocidade (fim do turno)
   REST_SPEED_THRESHOLD: 0.12,
+
+  // Trava de segurança: se nunca convergir pro repouso (oscilação residual
+  // por atrito/restituição), força a parada após esse tempo — sem isso o
+  // turno pode ficar preso pra sempre e a vez nunca chega ao adversário.
+  SETTLE_TIMEOUT_MS: 6000,
 } as const;
 
 // --- Regras de jogo ---
@@ -63,8 +68,8 @@ export const RULES = {
 export const AI = {
   THINK_MS_MIN: 500, // pausa mínima antes do peteleco (parece "pensar")
   THINK_MS_MAX: 1100,
-  MAX_AIM_ERROR_DEG: 18, // erro de ângulo com control=0; escala linear até 0 com control=100
-  FORCE_FACTOR: 0.85, // fração do FLICK_MAX_FORCE usada como base da tacada da IA
+  MAX_AIM_ERROR_DEG: 11, // erro de ângulo com control=0; escala linear até 0 com control=100
+  FORCE_FACTOR: 1.0, // fração do FLICK_MAX_FORCE usada como base da tacada da IA
 } as const;
 
 export type TeamSide = 'home' | 'away';
