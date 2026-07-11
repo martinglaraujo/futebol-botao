@@ -22,6 +22,7 @@ export class ButtonEntity {
   private scene: Phaser.Scene;
   private discGfx: Phaser.GameObjects.Container;
   private playerSprite: Phaser.GameObjects.Container;
+  private cardBadge: Phaser.GameObjects.Container;
 
   // Estado disciplinar
   yellowCards = 0;
@@ -58,6 +59,9 @@ export class ButtonEntity {
     // --- Visual aproximado: o jogador miniatura ---
     this.playerSprite = this.buildPlayerSprite();
     this.playerSprite.setVisible(false);
+    // --- Cartãozinho: visível em qualquer LOD enquanto o jogador tiver amarelo ---
+    this.cardBadge = this.buildCardBadge();
+    this.cardBadge.setVisible(false);
   }
 
   /** Desenha o disco clássico: base + anel + brilho + número. */
@@ -100,6 +104,25 @@ export class ButtonEntity {
     return this.scene.add.container(0, 0, [g]).setDepth(11);
   }
 
+  /** Cartãozinho amarelo no canto do botão — fica sempre visível (independe do LOD). */
+  private buildCardBadge(): Phaser.GameObjects.Container {
+    const r = PHYSICS.BUTTON_RADIUS;
+    const bx = r * 0.65;
+    const by = -r * 0.75;
+    const g = this.scene.add.graphics();
+    g.fillStyle(0xf4d03f, 1);
+    g.lineStyle(1, 0x8a6d00, 0.9);
+    g.fillRoundedRect(bx - 4, by - 6, 8, 12, 1.5);
+    g.strokeRoundedRect(bx - 4, by - 6, 8, 12, 1.5);
+    return this.scene.add.container(0, 0, [g]).setDepth(15);
+  }
+
+  /** Registra o total de amarelos do jogador e atualiza o cartãozinho visível. */
+  setYellowCards(count: number): void {
+    this.yellowCards = count;
+    this.cardBadge.setVisible(count >= 1);
+  }
+
   /** Alterna o nível de detalhe conforme o zoom (LOD). */
   setDetailed(detailed: boolean): void {
     this.discGfx.setVisible(!detailed);
@@ -111,6 +134,7 @@ export class ButtonEntity {
     const { position, angle } = this.body;
     this.discGfx.setPosition(position.x, position.y).setRotation(angle);
     this.playerSprite.setPosition(position.x, position.y);
+    this.cardBadge.setPosition(position.x, position.y);
   }
 
   /** Velocidade escalar atual (para saber quando o botão parou). */
@@ -124,6 +148,7 @@ export class ButtonEntity {
     this.scene.matter.world.remove(this.body);
     this.discGfx.destroy();
     this.playerSprite.destroy();
+    this.cardBadge.destroy();
     this.sentOff = true;
   }
 }

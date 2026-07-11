@@ -290,7 +290,7 @@ export class MatchScene extends Phaser.Scene {
   private callFoul(offender: ButtonEntity): void {
     const count = (this.yellowCounts[offender.side].get(offender.player.id) ?? 0) + 1;
     this.yellowCounts[offender.side].set(offender.player.id, count);
-    offender.yellowCards = count;
+    offender.setYellowCards(count);
     const sendOff = count >= RULES.YELLOW_BEFORE_RED;
     this.showCardBanner(offender, sendOff ? 'red' : 'yellow');
     this.cameras.main.flash(200, 255, sendOff ? 40 : 210, 0);
@@ -372,7 +372,7 @@ export class MatchScene extends Phaser.Scene {
         const { player } = entry;
         const y = fieldTop + (span * (i + 1)) / (line.count + 1);
         const button = new ButtonEntity(this, x, y, side, player, buttonColor);
-        button.yellowCards = this.yellowCounts[side].get(player.id) ?? 0;
+        button.setYellowCards(this.yellowCounts[side].get(player.id) ?? 0);
         this.buttons.push(button);
       }
     });
