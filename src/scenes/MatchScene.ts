@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, FIELD, PHYSICS, RULES, FOULS, type TeamSide } from '@/config/constants';
+import { GAME, FIELD, PHYSICS, RULES, FOULS, TOUCH_RULES, type TeamSide } from '@/config/constants';
 import { ButtonEntity } from '@/entities/ButtonEntity';
 import { FlickController } from '@/systems/FlickController';
 import { AIController } from '@/systems/AIController';
@@ -48,6 +48,12 @@ export class MatchScene extends Phaser.Scene {
   private clockRunning = false;
   private cardBanner!: HTMLDivElement;
   private lastFoulAt = -Infinity;
+  // Controle de toques da posse atual (RULES: ver TOUCH_RULES).
+  private possessionTouches = 0;
+  private sameButtonTouches = 0;
+  private lastTouchButtonId: string | null = null;
+  private touchedThisFlick = false;
+  private touchButtonIdThisFlick: string | null = null;
   /** IDs de jogadores expulsos (vermelho) — ficam fora mesmo após rebuildTeam(). */
   private sentOffIds: Record<TeamSide, Set<string>> = { home: new Set(), away: new Set() };
   /** Amarelos acumulados por jogador — sobrevive ao rebuildTeam() (ButtonEntity é recriado a cada gol). */
@@ -145,6 +151,11 @@ export class MatchScene extends Phaser.Scene {
     this.lastFoulAt = -Infinity;
     this.sentOffIds = { home: new Set(), away: new Set() };
     this.yellowCounts = { home: new Map(), away: new Map() };
+    this.possessionTouches = 0;
+    this.sameButtonTouches = 0;
+    this.lastTouchButtonId = null;
+    this.touchedThisFlick = false;
+    this.touchButtonIdThisFlick = null;
     this.awaitingRest = false;
     this.awaitingRestSince = 0;
     this.ballDeadFrames = 0;
@@ -262,7 +273,13 @@ export class MatchScene extends Phaser.Scene {
   private trackBallTouch(bodyA: MatterJS.BodyType, bodyB: MatterJS.BodyType): void {
     const other = bodyA.label === 'ball' ? bodyB : bodyB.label === 'ball' ? bodyA : null;
     if (!other || !other.label.startsWith('button:')) return;
-    this.lastToucherSide = other.label.split(':')[1] as TeamSide;
+    const [, side, playerId] = other.label.split(':');
+    this.lastToucherSide = side as TeamSide;
+    // Só conta pro controle de toques se foi o TIME DA POSSE quem tocou.
+    if (side === this.turn) {
+      this.touchedThisFlick = true;
+      this.touchButtonIdThisFlick = playerId;
+    }
   }
 
   /**
@@ -431,7 +448,11 @@ export class MatchScene extends Phaser.Scene {
       this.clockRunning = true;
       this.scoreboard.updateTime(this.remainingSeconds, this.half);
     }
-    // O turno alterna assim que o movimento cessar (checado no update()).
+    // Reseta o registro de toque deste peteleco — trackBallTouch() marca
+    // se algum botão do time da posse encostou na bola durante o assentamento.
+    this.touchedThisFlick = false;
+    this.touchButtonIdThisFlick = null;
+    // A posse é resolvida assim que o movimento cessar (checado no update()).
     this.awaitingRest = true;
     this.awaitingRestSince = this.time.now;
     this.flick.enabled = false;
@@ -522,6 +543,7 @@ export class MatchScene extends Phaser.Scene {
     this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
+    this.resetPossessionTouches(); // bola saiu de jogo — reinicia a contagem de toques
   }
 
   /** FORA: bola saiu pela lateral (topo/base) — reposiciona no ponto de saída (tiro de lateral). */
@@ -531,6 +553,13 @@ export class MatchScene extends Phaser.Scene {
     this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
+    this.resetPossessionTouches();
+  }
+
+  private resetPossessionTouches(): void {
+    this.possessionTouches = 0;
+    this.sameButtonTouches = 0;
+    this.lastTouchButtonId = null;
   }
 
   private ballDeadFrames = 0;
@@ -553,6 +582,7 @@ export class MatchScene extends Phaser.Scene {
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
     this.lastToucherSide = null;
+    this.resetPossessionTouches();
   }
 
   // ---------- LOD / Zoom (perspectiva dinâmica) ----------
@@ -581,19 +611,57 @@ export class MatchScene extends Phaser.Scene {
 
     if (this.matchOver) return;
 
-    // Fim do movimento → passa o turno e reabilita o peteleco. Se a física
-    // nunca convergir (oscilação residual), a trava de tempo força a parada.
+    // Fim do movimento → resolve a posse (continua ou passa a vez) e
+    // reabilita o peteleco. Se a física nunca convergir (oscilação
+    // residual), a trava de tempo força a parada.
     const settledByTimeout = this.time.now - this.awaitingRestSince > PHYSICS.SETTLE_TIMEOUT_MS;
     if (this.awaitingRest && (this.everythingStopped() || settledByTimeout)) {
       if (settledByTimeout) this.forceStopAll();
       this.awaitingRest = false;
-      this.turn = this.turn === 'home' ? 'away' : 'home';
-      if (this.turn === RULES.CPU_SIDE) {
-        this.flick.enabled = false;
-        this.playCpuTurn();
-      } else {
-        this.flick.enabled = true;
-      }
+      this.resolvePossession();
     }
+  }
+
+  /**
+   * Decide se o time da vez mantém a posse (continuou tocando a bola,
+   * dentro dos limites de TOUCH_RULES) ou se ela passa pro adversário.
+   */
+  private resolvePossession(): void {
+    if (!this.keepsPossession()) {
+      this.turn = this.turn === 'home' ? 'away' : 'home';
+      this.resetPossessionTouches();
+    }
+    if (this.turn === RULES.CPU_SIDE) {
+      this.flick.enabled = false;
+      this.playCpuTurn();
+    } else {
+      this.flick.enabled = true;
+    }
+  }
+
+  /** Atualiza os contadores de toque deste peteleco e devolve se o time pode continuar. */
+  private keepsPossession(): boolean {
+    if (!this.touchedThisFlick) {
+      console.log(`[TOQUES] ${this.turn} perdeu a posse — não tocou na bola`);
+      return false;
+    }
+
+    if (this.touchButtonIdThisFlick === this.lastTouchButtonId) {
+      this.sameButtonTouches += 1;
+    } else {
+      this.sameButtonTouches = 1;
+      this.lastTouchButtonId = this.touchButtonIdThisFlick;
+    }
+    this.possessionTouches += 1;
+
+    if (this.sameButtonTouches > TOUCH_RULES.MAX_SAME_BUTTON) {
+      console.log(`[TOQUES] ${this.turn} perdeu a posse — ${this.sameButtonTouches} toques seguidos com o mesmo botão`);
+      return false;
+    }
+    if (this.possessionTouches >= TOUCH_RULES.MAX_TOTAL) {
+      console.log(`[TOQUES] ${this.turn} perdeu a posse — limite de ${TOUCH_RULES.MAX_TOTAL} toques na jogada`);
+      return false;
+    }
+    return true;
   }
 }

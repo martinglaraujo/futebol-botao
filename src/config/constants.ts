@@ -64,6 +64,15 @@ export const RULES = {
   CPU_SIDE: 'away' as TeamSide, // lado jogado pela IA; o outro é humano
 } as const;
 
+// --- Controle de toques ---
+// O time mantém a posse enquanto continuar tocando a bola, respeitando os
+// limites abaixo. Ao estourar um limite (ou simplesmente não tocar a bola
+// no peteleco), a posse passa pro adversário.
+export const TOUCH_RULES = {
+  MAX_SAME_BUTTON: 3, // toques consecutivos com o MESMO botão antes de perder a posse
+  MAX_TOTAL: 12, // toques totais na posse (qualquer botão do time) antes de perder a posse
+} as const;
+
 // --- IA ---
 export const AI = {
   THINK_MS_MIN: 500, // pausa mínima antes do peteleco (parece "pensar")
