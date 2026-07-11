@@ -2,6 +2,8 @@
 
 Jogo de futebol de botão **offline** e altamente **customizável**, rodando no navegador (PWA) e adaptado para tablet/celular (testado mirando o **Redmi Pad 2**, landscape).
 
+**Jogar:** https://martinglaraujo.github.io/futebol-botao/
+
 ## Stack
 
 - **Phaser 3** — engine de jogo 2D.
