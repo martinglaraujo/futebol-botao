@@ -56,6 +56,15 @@ export const RULES = {
   PLAYERS_PER_TEAM: 11, // botões em campo por time (goleiro + 10 linha)
   YELLOW_BEFORE_RED: 2, // 2 amarelos = vermelho
   MAX_TURN_SECONDS: 15, // tempo para bater o peteleco antes de perder o turno
+  CPU_SIDE: 'away' as TeamSide, // lado jogado pela IA; o outro é humano
+} as const;
+
+// --- IA ---
+export const AI = {
+  THINK_MS_MIN: 500, // pausa mínima antes do peteleco (parece "pensar")
+  THINK_MS_MAX: 1100,
+  MAX_AIM_ERROR_DEG: 18, // erro de ângulo com control=0; escala linear até 0 com control=100
+  FORCE_FACTOR: 0.85, // fração do FLICK_MAX_FORCE usada como base da tacada da IA
 } as const;
 
 export type TeamSide = 'home' | 'away';

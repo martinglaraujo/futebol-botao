@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
-import { GAME, FIELD, PHYSICS, type TeamSide } from '@/config/constants';
+import { GAME, FIELD, PHYSICS, RULES, type TeamSide } from '@/config/constants';
 import { ButtonEntity } from '@/entities/ButtonEntity';
 import { FlickController } from '@/systems/FlickController';
+import { AIController } from '@/systems/AIController';
 import { seedTeams } from '@/data/seedTeams';
 import { getFormation, DEFAULT_FORMATION_ID, type Formation } from '@/data/formations';
 import { FormationBar } from '@/ui/FormationBar';
@@ -22,6 +23,7 @@ export class MatchScene extends Phaser.Scene {
   private ball!: MatterJS.BodyType;
   private ballGfx!: Phaser.GameObjects.Arc;
   private flick!: FlickController;
+  private ai!: AIController;
   private turn: TeamSide = 'home';
   private detailed = false;
   private score = { home: 0, away: 0 };
@@ -56,12 +58,16 @@ export class MatchScene extends Phaser.Scene {
     this.spawnTeam(home, 'home');
     this.spawnTeam(away, 'away');
 
-    // Só o time da vez pode ser petelecado; e só quando tudo está parado.
+    // Só o time humano da vez pode ser petelecado; e só quando tudo está parado.
     this.flick = new FlickController(
       this,
-      () => (this.everythingStopped() ? this.buttons.filter((b) => b.side === this.turn && !b.sentOff) : []),
+      () =>
+        this.everythingStopped() && this.turn !== RULES.CPU_SIDE
+          ? this.buttons.filter((b) => b.side === this.turn && !b.sentOff)
+          : [],
       () => this.onFlickResolved(),
     );
+    this.ai = new AIController(this);
 
     this.setupZoomControls();
 
@@ -239,6 +245,17 @@ export class MatchScene extends Phaser.Scene {
     this.flick.enabled = false;
   }
 
+  /** Centro do gol adversário do lado informado (para onde a IA mira). */
+  private opponentGoalOf(side: TeamSide): { x: number; y: number } {
+    const x = side === 'home' ? GAME.WIDTH - FIELD.MARGIN : FIELD.MARGIN;
+    return { x, y: GAME.HEIGHT / 2 };
+  }
+
+  private playCpuTurn(): void {
+    const strikers = this.buttons.filter((b) => b.side === this.turn && !b.sentOff);
+    this.ai.playTurn(strikers, this.ball, this.opponentGoalOf(this.turn), () => this.onFlickResolved());
+  }
+
   private awaitingRest = false;
 
   /**
@@ -325,8 +342,12 @@ export class MatchScene extends Phaser.Scene {
     if (this.awaitingRest && this.everythingStopped()) {
       this.awaitingRest = false;
       this.turn = this.turn === 'home' ? 'away' : 'home';
-      this.flick.enabled = true;
-      // TODO: se turn === lado da IA, chamar AIController.playTurn().
+      if (this.turn === RULES.CPU_SIDE) {
+        this.flick.enabled = false;
+        this.playCpuTurn();
+      } else {
+        this.flick.enabled = true;
+      }
     }
   }
 }

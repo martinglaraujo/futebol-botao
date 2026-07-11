@@ -36,7 +36,7 @@ src/
 ├── config/        # constantes globais (física, campo, regras)
 ├── models/        # interfaces do "Modo Criar" (Team, Player, Kit, Stadium...) — 100% JSON
 ├── entities/      # ButtonEntity (corpo físico + render dual botão/jogador)
-├── systems/       # FlickController (peteleco), SaveSystem (persistência local)
+├── systems/       # FlickController (peteleco), AIController (turno da CPU), SaveSystem (persistência local)
 ├── scenes/        # MatchScene (campo, paredes, gols, turnos, LOD)
 ├── data/          # seedTeams (Brasil, Argentina + potências)
 ├── utils/         # helpers
@@ -45,7 +45,7 @@ src/
 
 ## Roadmap (próximos passos)
 
-- [ ] `AIController` — turno da CPU (mira + força por atributos).
+- [x] `AIController` — turno da CPU (mira + força por atributos).
 - [ ] Sistema de faltas + cartões (amarelo/vermelho remove o botão — `ButtonEntity.destroy()` já pronto).
 - [ ] Telas de menu, **Modo Criar** (editores de time/jogador/estádio) e HUD de placar/tempo.
 - [ ] Modos **Campeonato (Liga)** e **Copinha do Mundo** (usando `Competition`).
