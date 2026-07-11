@@ -6,6 +6,7 @@ import { AIController } from '@/systems/AIController';
 import { seedTeams } from '@/data/seedTeams';
 import { getFormation, DEFAULT_FORMATION_ID, type Formation } from '@/data/formations';
 import { FormationBar } from '@/ui/FormationBar';
+import { Scoreboard } from '@/ui/Scoreboard';
 import type { Team, Player, Position } from '@/models';
 
 /**
@@ -38,6 +39,7 @@ export class MatchScene extends Phaser.Scene {
     away: null,
   };
   private formationBar!: FormationBar;
+  private scoreboard!: Scoreboard;
 
   constructor() {
     super('MatchScene');
@@ -76,7 +78,11 @@ export class MatchScene extends Phaser.Scene {
       this.formationId[side] = id;
       this.rebuildTeam(side);
     });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.formationBar.destroy());
+    this.scoreboard = new Scoreboard(home.shortName, away.shortName);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.formationBar.destroy();
+      this.scoreboard.destroy();
+    });
   }
 
   // ---------- Construção do campo ----------
@@ -203,7 +209,8 @@ export class MatchScene extends Phaser.Scene {
   /** Desenha o banco de reservas na margem (fora das linhas), sem física. */
   private drawBench(side: TeamSide, bench: Player[], buttonColor: number): void {
     this.benchGfx[side]?.destroy();
-    const y = side === 'home' ? GAME.HEIGHT - 26 : 26;
+    // O banco do away fica mais baixo que o do home para não colidir com o placar (Scoreboard).
+    const y = side === 'home' ? GAME.HEIGHT - 26 : 48;
     const startX = GAME.WIDTH / 2 - ((bench.length - 1) * 30) / 2;
     const items: Phaser.GameObjects.GameObject[] = [];
     bench.forEach((player, i) => {
@@ -301,6 +308,7 @@ export class MatchScene extends Phaser.Scene {
 
   private onGoal(scorer: TeamSide): void {
     this.score[scorer] += 1;
+    this.scoreboard.update(this.score.home, this.score.away);
     // TODO: zoom-in de comemoração + hino + reset de posições.
     this.cameras.main.flash(300, 255, 255, 255);
     this.resetKickoff();
