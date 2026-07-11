@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, FIELD, PHYSICS, RULES, type TeamSide } from '@/config/constants';
+import { GAME, FIELD, PHYSICS, RULES, FOULS, type TeamSide } from '@/config/constants';
 import { ButtonEntity } from '@/entities/ButtonEntity';
 import { FlickController } from '@/systems/FlickController';
 import { AIController } from '@/systems/AIController';
@@ -46,6 +46,12 @@ export class MatchScene extends Phaser.Scene {
   private matchOver = false;
   private half: 1 | 2 = 1;
   private clockRunning = false;
+  private cardBanner!: HTMLDivElement;
+  private lastFoulAt = -Infinity;
+  /** IDs de jogadores expulsos (vermelho) — ficam fora mesmo após rebuildTeam(). */
+  private sentOffIds: Record<TeamSide, Set<string>> = { home: new Set(), away: new Set() };
+  /** Amarelos acumulados por jogador — sobrevive ao rebuildTeam() (ButtonEntity é recriado a cada gol). */
+  private yellowCounts: Record<TeamSide, Map<string, number>> = { home: new Map(), away: new Map() };
 
   constructor() {
     super('MatchScene');
@@ -70,7 +76,7 @@ export class MatchScene extends Phaser.Scene {
     this.spawnBall();
     this.spawnTeam(home, 'home');
     this.spawnTeam(away, 'away');
-    this.trackLastToucher();
+    this.trackCollisions();
 
     // Só o time humano da vez pode ser petelecado; e só quando tudo está parado.
     this.flick = new FlickController(
@@ -93,10 +99,34 @@ export class MatchScene extends Phaser.Scene {
     this.scoreboard = new Scoreboard(home.shortName, away.shortName, () => this.scene.restart());
     this.scoreboard.updateTime(this.remainingSeconds, this.half);
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickClock() });
+    this.cardBanner = this.buildCardBanner();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.formationBar.destroy();
       this.scoreboard.destroy();
+      this.cardBanner.remove();
     });
+  }
+
+  /** Banner transitório de cartão (DOM overlay), começa invisível. */
+  private buildCardBanner(): HTMLDivElement {
+    const el = document.createElement('div');
+    Object.assign(el.style, {
+      position: 'fixed',
+      top: '46px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      padding: '5px 14px',
+      borderRadius: '6px',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '13px',
+      fontWeight: '700',
+      zIndex: '10',
+      pointerEvents: 'none',
+      opacity: '0',
+      transition: 'opacity 0.25s',
+    });
+    document.body.appendChild(el);
+    return el;
   }
 
   /** Reseta todo o estado mutável — necessário porque scene.restart() reaproveita a instância. */
@@ -112,6 +142,9 @@ export class MatchScene extends Phaser.Scene {
     this.matchOver = false;
     this.half = 1;
     this.clockRunning = false;
+    this.lastFoulAt = -Infinity;
+    this.sentOffIds = { home: new Set(), away: new Set() };
+    this.yellowCounts = { home: new Map(), away: new Map() };
     this.awaitingRest = false;
     this.awaitingRestSince = 0;
     this.ballDeadFrames = 0;
@@ -211,16 +244,73 @@ export class MatchScene extends Phaser.Scene {
     this.ballGfx = this.add.circle(GAME.WIDTH / 2, GAME.HEIGHT / 2, PHYSICS.BALL_RADIUS, 0xffffff).setDepth(20);
   }
 
-  /** Registra qual lado tocou a bola por último (decide escanteio vs. tiro de meta). */
-  private trackLastToucher(): void {
+  /**
+   * Registra qual lado tocou a bola por último (decide escanteio vs. tiro de
+   * meta) e detecta faltas: choque forte entre botões de times diferentes.
+   */
+  private trackCollisions(): void {
     this.matter.world.on('collisionstart', (event: MatterJS.IEventCollision<MatterJS.Engine>) => {
       for (const pair of event.pairs) {
         const bodyA = pair.bodyA as MatterJS.BodyType;
         const bodyB = pair.bodyB as MatterJS.BodyType;
-        const other = bodyA.label === 'ball' ? bodyB : bodyB.label === 'ball' ? bodyA : null;
-        if (!other || !other.label.startsWith('button:')) continue;
-        this.lastToucherSide = other.label.split(':')[1] as TeamSide;
+        this.trackBallTouch(bodyA, bodyB);
+        this.checkFoul(bodyA, bodyB);
       }
+    });
+  }
+
+  private trackBallTouch(bodyA: MatterJS.BodyType, bodyB: MatterJS.BodyType): void {
+    const other = bodyA.label === 'ball' ? bodyB : bodyB.label === 'ball' ? bodyA : null;
+    if (!other || !other.label.startsWith('button:')) return;
+    this.lastToucherSide = other.label.split(':')[1] as TeamSide;
+  }
+
+  /**
+   * Falta automática: colisão entre botões de TIMES DIFERENTES com
+   * velocidade relativa acima do limiar — só a pancada forte e direta
+   * conta. O botão mais rápido dos dois é o "culpado" (foi ele quem
+   * acabou de ser petelecado contra o outro).
+   */
+  private checkFoul(bodyA: MatterJS.BodyType, bodyB: MatterJS.BodyType): void {
+    if (!bodyA.label.startsWith('button:') || !bodyB.label.startsWith('button:')) return;
+    const btnA = this.buttons.find((b) => b.body === bodyA);
+    const btnB = this.buttons.find((b) => b.body === bodyB);
+    if (!btnA || !btnB || btnA.side === btnB.side || btnA.sentOff || btnB.sentOff) return;
+
+    const relSpeed = Math.hypot(bodyA.velocity.x - bodyB.velocity.x, bodyA.velocity.y - bodyB.velocity.y);
+    if (relSpeed < FOULS.IMPACT_SPEED_THRESHOLD) return;
+
+    if (this.time.now - this.lastFoulAt < FOULS.REPEAT_COOLDOWN_MS) return; // mesma pancada, não conta 2x
+    this.lastFoulAt = this.time.now;
+
+    const offender = btnA.speed >= btnB.speed ? btnA : btnB;
+    this.callFoul(offender);
+  }
+
+  private callFoul(offender: ButtonEntity): void {
+    const count = (this.yellowCounts[offender.side].get(offender.player.id) ?? 0) + 1;
+    this.yellowCounts[offender.side].set(offender.player.id, count);
+    offender.yellowCards = count;
+    const sendOff = count >= RULES.YELLOW_BEFORE_RED;
+    this.showCardBanner(offender, sendOff ? 'red' : 'yellow');
+    this.cameras.main.flash(200, 255, sendOff ? 40 : 210, 0);
+    if (sendOff) {
+      this.sentOffIds[offender.side].add(offender.player.id);
+      offender.destroy();
+    }
+    console.log(
+      `[FALTA] ${offender.side} #${offender.player.number} ${offender.player.name} — ${sendOff ? 'VERMELHO (expulso)' : 'amarelo'}`,
+    );
+  }
+
+  private showCardBanner(offender: ButtonEntity, kind: 'yellow' | 'red'): void {
+    this.cardBanner.style.background = kind === 'yellow' ? '#f4d03f' : '#e74c3c';
+    this.cardBanner.style.color = kind === 'yellow' ? '#111' : '#fff';
+    const label = kind === 'yellow' ? 'CARTÃO AMARELO' : 'CARTÃO VERMELHO — EXPULSO';
+    this.cardBanner.textContent = `${label}: ${offender.player.name}`;
+    this.cardBanner.style.opacity = '1';
+    this.time.delayedCall(2200, () => {
+      this.cardBanner.style.opacity = '0';
     });
   }
 
@@ -248,7 +338,16 @@ export class MatchScene extends Phaser.Scene {
    */
   private spawnTeam(team: Team, side: TeamSide): void {
     const formation = getFormation(this.formationId[side]);
-    const { starters, bench } = this.allocate(team.squad, formation);
+    const available = team.squad.filter((p) => !this.sentOffIds[side].has(p.id));
+    const { starters: allStarters, bench: allBench } = this.allocate(available, formation);
+
+    // Expulsão não é reposta: o time joga com um a menos pro resto da
+    // partida, então cortamos o fim da lista de titulares em vez de deixar
+    // o banco preencher a vaga do jogador expulso.
+    const maxStarters = RULES.PLAYERS_PER_TEAM - this.sentOffIds[side].size;
+    const starters = allStarters.slice(0, maxStarters);
+    const bench = [...allBench, ...allStarters.slice(maxStarters).map((s) => s.player)];
+
     const buttonColor = Phaser.Display.Color.HexStringToColor(team.kits[0].buttonColor).color;
 
     // home ataca para a direita: gol perto da borda, ataque perto do meio.
@@ -268,9 +367,13 @@ export class MatchScene extends Phaser.Scene {
       // Dividir o setor em (count + 1) intervalos => botões equidistantes
       // entre si E entre as linhas de limite do campo (por setor).
       for (let i = 0; i < line.count; i++) {
-        const { player } = starters[cursor++];
+        const entry = starters[cursor++];
+        if (!entry) continue; // vaga sem titular (time jogando com expulsão)
+        const { player } = entry;
         const y = fieldTop + (span * (i + 1)) / (line.count + 1);
-        this.buttons.push(new ButtonEntity(this, x, y, side, player, buttonColor));
+        const button = new ButtonEntity(this, x, y, side, player, buttonColor);
+        button.yellowCards = this.yellowCounts[side].get(player.id) ?? 0;
+        this.buttons.push(button);
       }
     });
 

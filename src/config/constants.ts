@@ -72,4 +72,13 @@ export const AI = {
   FORCE_FACTOR: 1.0, // fração do FLICK_MAX_FORCE usada como base da tacada da IA
 } as const;
 
+// --- Faltas (automáticas, por física) ---
+// Um peteleco no talo produz velocidade ~10; cai pra ~7 em poucos frames.
+// Colisão entre botões de TIMES DIFERENTES acima do limiar vira falta —
+// só a pancada bem forte e direta conta, não qualquer toque de bola parada.
+export const FOULS = {
+  IMPACT_SPEED_THRESHOLD: 8,
+  REPEAT_COOLDOWN_MS: 800, // evita contar o mesmo choque 2x (múltiplos pares na mesma colisão)
+} as const;
+
 export type TeamSide = 'home' | 'away';
