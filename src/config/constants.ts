@@ -14,7 +14,7 @@ export const GAME = {
 
 // --- Mesa / campo ---
 export const FIELD = {
-  MARGIN: 60, // distância da linha de fundo até a borda da mesa
+  MARGIN: 80, // distância da linha de fundo até a borda da mesa (campo um pouco menor => bola alcança a lateral com mais frequência, FORA acontece de verdade)
   LINE_COLOR: 0xffffff,
   LINE_ALPHA: 0.85,
   LINE_WIDTH: 3,

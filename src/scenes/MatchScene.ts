@@ -7,6 +7,7 @@ import { seedTeams } from '@/data/seedTeams';
 import { getFormation, DEFAULT_FORMATION_ID, type Formation } from '@/data/formations';
 import { FormationBar } from '@/ui/FormationBar';
 import { Scoreboard } from '@/ui/Scoreboard';
+import { SubstitutionPanel } from '@/ui/SubstitutionPanel';
 import type { Team, Player, Position } from '@/models';
 
 /**
@@ -40,6 +41,9 @@ export class MatchScene extends Phaser.Scene {
   };
   private formationBar!: FormationBar;
   private scoreboard!: Scoreboard;
+  private subPanel!: SubstitutionPanel;
+  /** Reservas atuais por lado (atualizado a cada spawnTeam/substituição). */
+  private benchPlayers: Record<TeamSide, Player[]> = { home: [], away: [] };
   /** Último lado a tocar a bola — decide escanteio (defensor) vs. tiro de meta (atacante). */
   private lastToucherSide: TeamSide | null = null;
   private remainingSeconds = RULES.MATCH_MINUTES * 60;
@@ -76,6 +80,10 @@ export class MatchScene extends Phaser.Scene {
     this.matter.world.setBounds(0, 0, GAME.WIDTH, GAME.HEIGHT); // fallback
     this.cameras.main.setBackgroundColor(GAME.BG_COLOR);
 
+    // Precisa existir ANTES do primeiro spawnTeam('home'), que já chama
+    // refreshSubPanel() pra popular a lista inicial de titulares/banco.
+    this.subPanel = new SubstitutionPanel((outId, inId) => this.substitutePlayer(outId, inId));
+
     this.drawTable();
     this.buildWalls();
     this.buildGoals();
@@ -110,6 +118,7 @@ export class MatchScene extends Phaser.Scene {
       this.formationBar.destroy();
       this.scoreboard.destroy();
       this.cardBanner.remove();
+      this.subPanel.destroy();
     });
   }
 
@@ -143,6 +152,7 @@ export class MatchScene extends Phaser.Scene {
     this.score = { home: 0, away: 0 };
     this.formationId = { home: DEFAULT_FORMATION_ID, away: DEFAULT_FORMATION_ID };
     this.benchGfx = { home: null, away: null };
+    this.benchPlayers = { home: [], away: [] };
     this.lastToucherSide = null;
     this.remainingSeconds = RULES.MATCH_MINUTES * 60;
     this.matchOver = false;
@@ -314,6 +324,7 @@ export class MatchScene extends Phaser.Scene {
     if (sendOff) {
       this.sentOffIds[offender.side].add(offender.player.id);
       offender.destroy();
+      if (offender.side === 'home') this.refreshSubPanel();
     }
     console.log(
       `[FALTA] ${offender.side} #${offender.player.number} ${offender.player.name} — ${sendOff ? 'VERMELHO (expulso)' : 'amarelo'}`,
@@ -394,7 +405,44 @@ export class MatchScene extends Phaser.Scene {
       }
     });
 
+    this.benchPlayers[side] = bench;
     this.drawBench(side, bench, buttonColor);
+    if (side === 'home') this.refreshSubPanel();
+  }
+
+  /** Atualiza o painel de substituição com os titulares/reservas atuais do home. */
+  private refreshSubPanel(): void {
+    const starters = this.buttons.filter((b) => b.side === 'home' && !b.sentOff).map((b) => b.player);
+    this.subPanel.update(starters, this.benchPlayers.home);
+  }
+
+  /** Troca um titular do home por um reserva, na mesma posição em campo. */
+  private substitutePlayer(outId: string, inId: string): void {
+    if (!this.everythingStopped()) {
+      console.log('[SUB] jogo ainda em movimento, tenta de novo quando parar');
+      return;
+    }
+    const outButton = this.buttons.find((b) => b.side === 'home' && b.player.id === outId && !b.sentOff);
+    const inPlayer = this.benchPlayers.home.find((p) => p.id === inId);
+    if (!outButton || !inPlayer) return;
+
+    const { x, y } = outButton.body.position;
+    const buttonColor = Phaser.Display.Color.HexStringToColor(this.homeTeam.kits[0].buttonColor).color;
+    const outPlayer = outButton.player;
+
+    this.buttons = this.buttons.filter((b) => b !== outButton);
+    outButton.destroy();
+
+    const newButton = new ButtonEntity(this, x, y, 'home', inPlayer, buttonColor);
+    newButton.setYellowCards(this.yellowCounts.home.get(inPlayer.id) ?? 0);
+    this.buttons.push(newButton);
+
+    this.benchPlayers.home = this.benchPlayers.home.filter((p) => p.id !== inId);
+    this.benchPlayers.home.push(outPlayer);
+
+    this.drawBench('home', this.benchPlayers.home, buttonColor);
+    this.refreshSubPanel();
+    console.log(`[SUB] ${outPlayer.name} sai, ${inPlayer.name} entra`);
   }
 
   /**
