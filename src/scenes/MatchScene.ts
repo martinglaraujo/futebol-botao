@@ -8,6 +8,7 @@ import { FORMATIONS, getFormation, DEFAULT_FORMATION_ID, type Formation } from '
 import { FormationBar } from '@/ui/FormationBar';
 import { Scoreboard } from '@/ui/Scoreboard';
 import { SubstitutionPanel } from '@/ui/SubstitutionPanel';
+import { LineupPanel, type LineupSlot } from '@/ui/LineupPanel';
 import { CodeBar } from '@/ui/CodeBar';
 import type { Team, Player, Position } from '@/models';
 
@@ -43,9 +44,12 @@ export class MatchScene extends Phaser.Scene {
   private formationBar!: FormationBar;
   private scoreboard!: Scoreboard;
   private subPanel!: SubstitutionPanel;
+  private lineupPanel!: LineupPanel;
   private codeBar!: CodeBar;
   /** Reservas atuais por lado (atualizado a cada spawnTeam/substituição). */
   private benchPlayers: Record<TeamSide, Player[]> = { home: [], away: [] };
+  /** Escalação manual do home (uma entrada por vaga do esquema, na ordem de formation.lines) — null = automático. */
+  private manualLineup: Player[] | null = null;
   /** Último lado a tocar a bola — decide escanteio (defensor) vs. tiro de meta (atacante). */
   private lastToucherSide: TeamSide | null = null;
   private remainingSeconds = RULES.MATCH_MINUTES * 60;
@@ -84,9 +88,10 @@ export class MatchScene extends Phaser.Scene {
     this.matter.world.setBounds(0, 0, GAME.WIDTH, GAME.HEIGHT); // fallback
     this.cameras.main.setBackgroundColor(GAME.BG_COLOR);
 
-    // Precisa existir ANTES do primeiro spawnTeam('home'), que já chama
-    // refreshSubPanel() pra popular a lista inicial de titulares/banco.
+    // Precisam existir ANTES do primeiro spawnTeam('home'), que já chama
+    // refreshSubPanel()/refreshLineupPanel() pra popular as listas iniciais.
     this.subPanel = new SubstitutionPanel((outId, inId) => this.substitutePlayer(outId, inId));
+    this.lineupPanel = new LineupPanel((ids) => this.applyLineup(ids));
 
     this.drawTable();
     this.buildWalls();
@@ -128,6 +133,7 @@ export class MatchScene extends Phaser.Scene {
       this.scoreboard.destroy();
       this.cardBanner.remove();
       this.subPanel.destroy();
+      this.lineupPanel.destroy();
       this.codeBar.destroy();
     });
   }
@@ -172,6 +178,7 @@ export class MatchScene extends Phaser.Scene {
     this.formationId = { home: DEFAULT_FORMATION_ID, away: DEFAULT_FORMATION_ID };
     this.benchGfx = { home: null, away: null };
     this.benchPlayers = { home: [], away: [] };
+    this.manualLineup = null;
     this.lastToucherSide = null;
     this.remainingSeconds = RULES.MATCH_MINUTES * 60;
     this.matchOver = false;
@@ -395,14 +402,32 @@ export class MatchScene extends Phaser.Scene {
   private spawnTeam(team: Team, side: TeamSide): void {
     const formation = getFormation(this.formationId[side]);
     const available = team.squad.filter((p) => !this.sentOffIds[side].has(p.id));
-    const { starters: allStarters, bench: allBench } = this.allocate(available, formation);
+    const slotCount = formation.lines.reduce((sum, l) => sum + l.count, 0);
 
-    // Expulsão não é reposta: o time joga com um a menos pro resto da
-    // partida, então cortamos o fim da lista de titulares em vez de deixar
-    // o banco preencher a vaga do jogador expulso.
-    const maxStarters = RULES.PLAYERS_PER_TEAM - this.sentOffIds[side].size;
-    const starters = allStarters.slice(0, maxStarters);
-    const bench = [...allBench, ...allStarters.slice(maxStarters).map((s) => s.player)];
+    let starters: { player: Player; role: Position }[];
+    let bench: Player[];
+
+    // Escalação manual (só home — ver LineupPanel): usa direto se ainda
+    // bate com o esquema atual (mesma qtd de vagas) e ninguém foi expulso
+    // desde que foi montada; senão volta pro automático com segurança.
+    const manual = side === 'home' ? this.manualLineup : null;
+    if (manual && manual.length === slotCount && manual.every((p) => available.some((a) => a.id === p.id))) {
+      starters = [];
+      let idx = 0;
+      for (const line of formation.lines) {
+        for (let i = 0; i < line.count; i++) starters.push({ player: manual[idx++], role: line.role });
+      }
+      const usedIds = new Set(manual.map((p) => p.id));
+      bench = available.filter((p) => !usedIds.has(p.id));
+    } else {
+      const { starters: allStarters, bench: allBench } = this.allocate(available, formation);
+      // Expulsão não é reposta: o time joga com um a menos pro resto da
+      // partida, então cortamos o fim da lista de titulares em vez de deixar
+      // o banco preencher a vaga do jogador expulso.
+      const maxStarters = RULES.PLAYERS_PER_TEAM - this.sentOffIds[side].size;
+      starters = allStarters.slice(0, maxStarters);
+      bench = [...allBench, ...allStarters.slice(maxStarters).map((s) => s.player)];
+    }
 
     const buttonColor = Phaser.Display.Color.HexStringToColor(team.kits[0].buttonColor).color;
 
@@ -435,7 +460,44 @@ export class MatchScene extends Phaser.Scene {
 
     this.benchPlayers[side] = bench;
     this.drawBench(side, bench, buttonColor);
-    if (side === 'home') this.refreshSubPanel();
+    if (side === 'home') {
+      // Reafirma a escalação atual como a "manual" — assim ela sobrevive a
+      // reconstruções futuras (gol, intervalo) em vez de sortear de novo.
+      this.manualLineup = starters.map((s) => s.player);
+      this.refreshSubPanel();
+      this.refreshLineupPanel();
+    }
+  }
+
+  /** Vagas do esquema atual do home, na mesma ordem usada pra montar o time. */
+  private currentLineupSlots(): LineupSlot[] {
+    const formation = getFormation(this.formationId.home);
+    const slots: LineupSlot[] = [];
+    for (const line of formation.lines) {
+      for (let i = 0; i < line.count; i++) slots.push({ role: line.role, index: i });
+    }
+    return slots;
+  }
+
+  /** Atualiza o painel de escalação com as vagas/titulares atuais do home. */
+  private refreshLineupPanel(): void {
+    const slots = this.currentLineupSlots();
+    const currentIds = (this.manualLineup ?? []).map((p) => p.id);
+    this.lineupPanel.setSlots(slots, currentIds, this.homeTeam.squad.filter((p) => !this.sentOffIds.home.has(p.id)));
+  }
+
+  /** Aplica uma escalação escolhida manualmente (ver LineupPanel) e reconstrói o time. */
+  private applyLineup(playerIds: string[]): void {
+    if (!this.everythingStopped()) {
+      console.log('[ESCALAÇÃO] jogo ainda em movimento, tenta de novo quando parar');
+      return;
+    }
+    const squad = this.homeTeam.squad;
+    const players = playerIds.map((id) => squad.find((p) => p.id === id)).filter((p): p is Player => !!p);
+    if (players.length !== playerIds.length) return; // algum id inválido — ignora
+    this.manualLineup = players;
+    this.rebuildTeam('home');
+    console.log('[ESCALAÇÃO] atualizada:', players.map((p) => `#${p.number} ${p.name}`).join(', '));
   }
 
   /** Atualiza o painel de substituição com os titulares/reservas atuais do home. */
@@ -469,7 +531,12 @@ export class MatchScene extends Phaser.Scene {
     this.benchPlayers.home.push(outPlayer);
 
     this.drawBench('home', this.benchPlayers.home, buttonColor);
+    // Mantém a escalação "manual" sincronizada com o time real — sem isso a
+    // troca se perderia no próximo gol/intervalo (spawnTeam recomeçaria do
+    // automático, ignorando essa substituição).
+    this.manualLineup = this.buttons.filter((b) => b.side === 'home' && !b.sentOff).map((b) => b.player);
     this.refreshSubPanel();
+    this.refreshLineupPanel();
     console.log(`[SUB] ${outPlayer.name} sai, ${inPlayer.name} entra`);
   }
 
