@@ -514,7 +514,11 @@ export class MatchScene extends Phaser.Scene {
   private everythingStopped(): boolean {
     const ballSpeed = Math.hypot(this.ball.velocity.x, this.ball.velocity.y);
     if (ballSpeed > PHYSICS.REST_SPEED_THRESHOLD) return false;
-    return this.buttons.every((b) => b.sentOff || b.speed <= PHYSICS.REST_SPEED_THRESHOLD);
+    // O goleiro (GOL) fica se autoajustando por conta própria o tempo todo
+    // (updateGoalkeepers) — se entrasse nessa checagem, um micro-tremor dele
+    // bastaria pra travar o próximo peteleco pra sempre (getFlickable()
+    // também usa este método). Ele não faz parte da "jogada resolvida".
+    return this.buttons.every((b) => b.sentOff || b.player.position === 'GOL' || b.speed <= PHYSICS.REST_SPEED_THRESHOLD);
   }
 
   private onFlickResolved(): void {
@@ -757,7 +761,7 @@ export class MatchScene extends Phaser.Scene {
   private updateTurnIndicator(): void {
     if (this.turn === RULES.CPU_SIDE) {
       const cpuTeam = RULES.CPU_SIDE === 'home' ? this.homeTeam : this.awayTeam;
-      this.scoreboard.updateTurn(`Vez do ${cpuTeam.shortName}...`);
+      this.scoreboard.updateTurn(`Vez d${cpuTeam.article === 'a' ? 'a' : 'o'} ${cpuTeam.name}...`);
     } else if (this.possessionTouches > 0) {
       this.scoreboard.updateTurn(`Sua vez — toque de novo (${this.possessionTouches}/${TOUCH_RULES.MAX_TOTAL})`);
     } else {

@@ -85,6 +85,7 @@ export interface Team {
   id: string;
   name: string;
   shortName: string;      // 3 letras: "BRA", "ARG"
+  article: 'o' | 'a';     // artigo em português: "o Brasil", "a Argentina"
   country: string;        // código ISO: "BR", "AR" ...
   crestRef: AssetRef;     // escudo
   colors: {
