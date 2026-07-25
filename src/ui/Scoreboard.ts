@@ -6,6 +6,7 @@ export class Scoreboard {
   private root: HTMLDivElement;
   private scoreEl: HTMLSpanElement;
   private timeEl: HTMLSpanElement;
+  private turnEl: HTMLDivElement;
 
   constructor(
     private homeShort: string,
@@ -57,8 +58,32 @@ export class Scoreboard {
     this.root.append(this.scoreEl, this.timeEl, restartBtn);
     document.body.appendChild(this.root);
 
+    // Linha extra logo abaixo — deixa explícito de quem é a vez, pra não
+    // parecer que travou quando o jogador mantém a posse (toque seguido).
+    this.turnEl = document.createElement('div');
+    Object.assign(this.turnEl.style, {
+      position: 'fixed',
+      top: '36px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      fontSize: '12px',
+      fontWeight: '600',
+      color: '#ffe28a',
+      background: 'rgba(0,0,0,0.4)',
+      padding: '2px 10px',
+      borderRadius: '6px',
+      pointerEvents: 'none',
+      zIndex: '10',
+      textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+    });
+    document.body.appendChild(this.turnEl);
+
     this.updateScore(0, 0);
     this.updateTime(0, 1);
+  }
+
+  updateTurn(text: string): void {
+    this.turnEl.textContent = text;
   }
 
   updateScore(home: number, away: number): void {
@@ -81,5 +106,6 @@ export class Scoreboard {
 
   destroy(): void {
     this.root.remove();
+    this.turnEl.remove();
   }
 }

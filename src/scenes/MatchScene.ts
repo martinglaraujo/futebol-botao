@@ -117,6 +117,7 @@ export class MatchScene extends Phaser.Scene {
     });
     this.scoreboard = new Scoreboard(home.shortName, away.shortName, () => this.scene.restart());
     this.scoreboard.updateTime(this.remainingSeconds, this.half);
+    this.updateTurnIndicator();
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickClock() });
     this.cardBanner = this.buildCardBanner();
     // Resgate manual: código secreto recoloca a bola no meio-campo, caso a
@@ -745,6 +746,22 @@ export class MatchScene extends Phaser.Scene {
       this.playCpuTurn();
     } else {
       this.flick.enabled = true;
+    }
+    this.updateTurnIndicator();
+  }
+
+  /**
+   * Deixa explícito de quem é a vez — sem isso, quando o jogador mantém a
+   * posse (toque seguido), a tela não muda em nada e parece que travou.
+   */
+  private updateTurnIndicator(): void {
+    if (this.turn === RULES.CPU_SIDE) {
+      const cpuTeam = RULES.CPU_SIDE === 'home' ? this.homeTeam : this.awayTeam;
+      this.scoreboard.updateTurn(`Vez do ${cpuTeam.shortName}...`);
+    } else if (this.possessionTouches > 0) {
+      this.scoreboard.updateTurn(`Sua vez — toque de novo (${this.possessionTouches}/${TOUCH_RULES.MAX_TOTAL})`);
+    } else {
+      this.scoreboard.updateTurn('Sua vez');
     }
   }
 
