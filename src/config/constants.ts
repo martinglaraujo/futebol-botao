@@ -73,6 +73,16 @@ export const TOUCH_RULES = {
   MAX_TOTAL: 12, // toques totais na posse (qualquer botão do time) antes de perder a posse
 } as const;
 
+// --- Goleiro ---
+// Autônomo: acompanha a bola lateralmente dentro do gol quando ela entra
+// na zona de reação (perto o bastante do próprio gol). Não é petelecável
+// manualmente — os dois comandos brigariam entre si.
+export const GOALKEEPER = {
+  MAX_SPEED: 3, // velocidade lateral máxima (nível intermediário — nem perfeito, nem parado)
+  REACT_ZONE_FRAC: 0.38, // fração da largura útil do campo, a partir da própria linha de fundo, em que reage
+  DEADBAND: 4, // se já está a menos disso do alvo, para (evita tremedeira perpétua)
+} as const;
+
 // --- IA ---
 export const AI = {
   THINK_MS_MIN: 500, // pausa mínima antes do peteleco (parece "pensar")

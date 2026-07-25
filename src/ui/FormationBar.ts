@@ -10,10 +10,12 @@ import { RULES, type TeamSide } from '@/config/constants';
  */
 export class FormationBar {
   private root: HTMLDivElement;
+  private cpuFormationEl: HTMLSpanElement | null = null;
 
   constructor(
     homeName: string,
     awayName: string,
+    initialCpuFormationId: string,
     private onChange: (side: TeamSide, formationId: string) => void,
   ) {
     this.root = document.createElement('div');
@@ -33,17 +35,21 @@ export class FormationBar {
       zIndex: '10',
     });
 
-    this.root.appendChild(this.buildEntry(homeName, 'home'));
-    this.root.appendChild(this.buildEntry(awayName, 'away'));
+    this.root.appendChild(this.buildEntry(homeName, 'home', initialCpuFormationId));
+    this.root.appendChild(this.buildEntry(awayName, 'away', initialCpuFormationId));
     document.body.appendChild(this.root);
   }
 
-  private buildEntry(teamName: string, side: TeamSide): HTMLElement {
-    return side === RULES.CPU_SIDE ? this.buildReadOnly(teamName) : this.buildSelect(teamName, side);
+  private buildEntry(teamName: string, side: TeamSide, cpuFormationId: string): HTMLElement {
+    return side === RULES.CPU_SIDE ? this.buildReadOnly(teamName, cpuFormationId) : this.buildSelect(teamName, side);
   }
 
-  /** Lado da CPU: mostra o esquema atual sem permitir edição pelo jogador. */
-  private buildReadOnly(teamName: string): HTMLElement {
+  /**
+   * Lado da CPU: mostra o esquema atual sem permitir edição pelo jogador —
+   * a IA escolhe sozinha (ver MatchScene.chooseAiFormation), atualizado
+   * via updateCpuFormation() a cada tempo.
+   */
+  private buildReadOnly(teamName: string, formationId: string): HTMLElement {
     const wrap = document.createElement('div');
     Object.assign(wrap.style, {
       display: 'flex',
@@ -60,11 +66,17 @@ export class FormationBar {
     label.style.fontWeight = '700';
 
     const formation = document.createElement('span');
-    formation.textContent = FORMATIONS.find((f) => f.id === DEFAULT_FORMATION_ID)?.name ?? '';
+    formation.textContent = FORMATIONS.find((f) => f.id === formationId)?.name ?? '';
     formation.style.opacity = '0.75';
+    this.cpuFormationEl = formation;
 
     wrap.append(label, formation);
     return wrap;
+  }
+
+  /** Atualiza o texto do esquema da CPU (chamado quando ela troca de esquema, ex. no intervalo). */
+  updateCpuFormation(formationId: string): void {
+    if (this.cpuFormationEl) this.cpuFormationEl.textContent = FORMATIONS.find((f) => f.id === formationId)?.name ?? '';
   }
 
   private buildSelect(teamName: string, side: TeamSide): HTMLElement {

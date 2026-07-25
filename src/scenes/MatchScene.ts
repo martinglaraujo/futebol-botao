@@ -1,13 +1,14 @@
 import Phaser from 'phaser';
-import { GAME, FIELD, PHYSICS, RULES, FOULS, TOUCH_RULES, type TeamSide } from '@/config/constants';
+import { GAME, FIELD, PHYSICS, RULES, FOULS, TOUCH_RULES, GOALKEEPER, type TeamSide } from '@/config/constants';
 import { ButtonEntity } from '@/entities/ButtonEntity';
 import { FlickController } from '@/systems/FlickController';
 import { AIController } from '@/systems/AIController';
 import { seedTeams } from '@/data/seedTeams';
-import { getFormation, DEFAULT_FORMATION_ID, type Formation } from '@/data/formations';
+import { FORMATIONS, getFormation, DEFAULT_FORMATION_ID, type Formation } from '@/data/formations';
 import { FormationBar } from '@/ui/FormationBar';
 import { Scoreboard } from '@/ui/Scoreboard';
 import { SubstitutionPanel } from '@/ui/SubstitutionPanel';
+import { CodeBar } from '@/ui/CodeBar';
 import type { Team, Player, Position } from '@/models';
 
 /**
@@ -42,6 +43,7 @@ export class MatchScene extends Phaser.Scene {
   private formationBar!: FormationBar;
   private scoreboard!: Scoreboard;
   private subPanel!: SubstitutionPanel;
+  private codeBar!: CodeBar;
   /** Reservas atuais por lado (atualizado a cada spawnTeam/substituição). */
   private benchPlayers: Record<TeamSide, Player[]> = { home: [], away: [] };
   /** Último lado a tocar a bola — decide escanteio (defensor) vs. tiro de meta (atacante). */
@@ -76,6 +78,8 @@ export class MatchScene extends Phaser.Scene {
     const [home, away] = seedTeams();
     this.homeTeam = home;
     this.awayTeam = away;
+    // A IA escolhe o próprio esquema tático (o jogador não mexe nele — ver FormationBar).
+    this.formationId[RULES.CPU_SIDE] = this.chooseAiFormation();
 
     this.matter.world.setBounds(0, 0, GAME.WIDTH, GAME.HEIGHT); // fallback
     this.cameras.main.setBackgroundColor(GAME.BG_COLOR);
@@ -92,12 +96,13 @@ export class MatchScene extends Phaser.Scene {
     this.spawnTeam(away, 'away');
     this.trackCollisions();
 
-    // Só o time humano da vez pode ser petelecado; e só quando tudo está parado.
+    // Só o time humano da vez pode ser petelecado (o goleiro é autônomo —
+    // ver updateGoalkeepers — e não entra nesse pool); e só quando tudo está parado.
     this.flick = new FlickController(
       this,
       () =>
         this.everythingStopped() && this.turn !== RULES.CPU_SIDE
-          ? this.buttons.filter((b) => b.side === this.turn && !b.sentOff)
+          ? this.buttons.filter((b) => b.side === this.turn && !b.sentOff && b.player.position !== 'GOL')
           : [],
       () => this.onFlickResolved(),
     );
@@ -106,7 +111,7 @@ export class MatchScene extends Phaser.Scene {
     this.setupZoomControls();
 
     // Dropdown de esquema tático por time.
-    this.formationBar = new FormationBar(home.name, away.name, (side, id) => {
+    this.formationBar = new FormationBar(home.name, away.name, this.formationId[RULES.CPU_SIDE], (side, id) => {
       this.formationId[side] = id;
       this.rebuildTeam(side);
     });
@@ -114,12 +119,25 @@ export class MatchScene extends Phaser.Scene {
     this.scoreboard.updateTime(this.remainingSeconds, this.half);
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickClock() });
     this.cardBanner = this.buildCardBanner();
+    // Resgate manual: código secreto recoloca a bola no meio-campo, caso a
+    // detecção automática de lateral/escanteio falhe em algum caso de borda.
+    this.codeBar = new CodeBar('44572963', () => this.resetBallToCenter());
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.formationBar.destroy();
       this.scoreboard.destroy();
       this.cardBanner.remove();
       this.subPanel.destroy();
+      this.codeBar.destroy();
     });
+  }
+
+  /** Recoloca só a bola no centro do campo (resgate manual via CodeBar). */
+  private resetBallToCenter(): void {
+    this.matter.body.setPosition(this.ball, { x: GAME.WIDTH / 2, y: GAME.HEIGHT / 2 });
+    this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
+    this.matter.body.setAngularVelocity(this.ball, 0);
+    this.ballDeadFrames = 6;
+    console.log('[CODE] bola reposicionada manualmente pro meio-campo');
   }
 
   /** Banner transitório de cartão (DOM overlay), começa invisível. */
@@ -187,8 +205,17 @@ export class MatchScene extends Phaser.Scene {
     this.half = 2;
     this.remainingSeconds = RULES.MATCH_MINUTES * 60;
     this.clockRunning = false;
+    // A IA pode trocar de esquema no intervalo, igual um técnico de verdade.
+    this.formationId[RULES.CPU_SIDE] = this.chooseAiFormation();
+    this.formationBar.updateCpuFormation(this.formationId[RULES.CPU_SIDE]);
     this.resetKickoff();
     this.scoreboard.showHalftime();
+  }
+
+  /** Sorteia um esquema tático pra IA usar (ela decide sozinha, sem o jogador poder mexer). */
+  private chooseAiFormation(): string {
+    const pick = Phaser.Utils.Array.GetRandom(FORMATIONS);
+    return pick.id;
   }
 
   private endMatch(): void {
@@ -523,8 +550,40 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private playCpuTurn(): void {
-    const strikers = this.buttons.filter((b) => b.side === this.turn && !b.sentOff);
+    const strikers = this.buttons.filter((b) => b.side === this.turn && !b.sentOff && b.player.position !== 'GOL');
     this.ai.playTurn(strikers, this.ball, this.opponentGoalOf(this.turn), () => this.onFlickResolved());
+  }
+
+  /**
+   * Goleiro autônomo: acompanha a bola lateralmente dentro do gol quando
+   * ela entra na zona de reação do próprio lado; senão volta pro centro.
+   * Controlado por velocidade (não por teleporte) pra continuar colidindo
+   * com a bola normalmente e pra não confundir everythingStopped().
+   */
+  private updateGoalkeepers(): void {
+    for (const side of ['home', 'away'] as const) {
+      const gk = this.buttons.find((b) => b.side === side && b.player.position === 'GOL' && !b.sentOff);
+      if (!gk) continue;
+
+      const cy = GAME.HEIGHT / 2;
+      const fieldSpan = GAME.WIDTH - FIELD.MARGIN * 2;
+      const reactDepth = fieldSpan * GOALKEEPER.REACT_ZONE_FRAC;
+      const inZone =
+        side === 'home'
+          ? this.ball.position.x <= FIELD.MARGIN + reactDepth
+          : this.ball.position.x >= GAME.WIDTH - FIELD.MARGIN - reactDepth;
+
+      const halfGoal = FIELD.GOAL_WIDTH / 2 - PHYSICS.BUTTON_RADIUS - 4;
+      const targetY = inZone ? Phaser.Math.Clamp(this.ball.position.y, cy - halfGoal, cy + halfGoal) : cy;
+
+      const diff = targetY - gk.body.position.y;
+      if (Math.abs(diff) < GOALKEEPER.DEADBAND) {
+        this.matter.body.setVelocity(gk.body, { x: gk.body.velocity.x, y: 0 });
+      } else {
+        const vy = Phaser.Math.Clamp(diff * 0.15, -GOALKEEPER.MAX_SPEED, GOALKEEPER.MAX_SPEED);
+        this.matter.body.setVelocity(gk.body, { x: gk.body.velocity.x, y: vy });
+      }
+    }
   }
 
   private awaitingRest = false;
@@ -658,6 +717,8 @@ export class MatchScene extends Phaser.Scene {
     this.updateLOD();
 
     if (this.matchOver) return;
+
+    this.updateGoalkeepers();
 
     // Fim do movimento → resolve a posse (continua ou passa a vez) e
     // reabilita o peteleco. Se a física nunca convergir (oscilação
