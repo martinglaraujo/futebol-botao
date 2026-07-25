@@ -763,7 +763,7 @@ export class MatchScene extends Phaser.Scene {
       const cpuTeam = RULES.CPU_SIDE === 'home' ? this.homeTeam : this.awayTeam;
       this.scoreboard.updateTurn(`Vez d${cpuTeam.article === 'a' ? 'a' : 'o'} ${cpuTeam.name}...`);
     } else if (this.possessionTouches > 0) {
-      this.scoreboard.updateTurn(`Sua vez — toque de novo (${this.possessionTouches}/${TOUCH_RULES.MAX_TOTAL})`);
+      this.scoreboard.updateTurn(`Sua vez — toque de novo (${this.possessionTouches + 1}/${TOUCH_RULES.MAX_TOTAL})`);
     } else {
       this.scoreboard.updateTurn('Sua vez');
     }
