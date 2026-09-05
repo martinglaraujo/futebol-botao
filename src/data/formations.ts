@@ -67,26 +67,6 @@ export const FORMATIONS: Formation[] = [
       { role: 'ATA', count: 2 },
     ],
   },
-  {
-    id: 'botao-6',
-    name: 'Botão Clássico (6)',
-    lines: [
-      { role: 'GOL', count: 1 },
-      { role: 'ZAG', count: 2 },
-      { role: 'MEI', count: 2 },
-      { role: 'ATA', count: 1 },
-    ],
-  },
-  {
-    id: 'botao-5',
-    name: 'Reduzido (5)',
-    lines: [
-      { role: 'GOL', count: 1 },
-      { role: 'ZAG', count: 2 },
-      { role: 'MEI', count: 1 },
-      { role: 'ATA', count: 1 },
-    ],
-  },
 ];
 
 export const DEFAULT_FORMATION_ID = '4-3-3-of';
