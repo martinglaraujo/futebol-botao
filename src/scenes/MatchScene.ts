@@ -60,6 +60,8 @@ export class MatchScene extends Phaser.Scene {
   private lastToucherSide: TeamSide | null = null;
   private remainingSeconds = RULES.MATCH_MINUTES * 60;
   private matchOver = false;
+  /** true no 2º tempo: os times trocam de lado (home passa a atacar pra esquerda). */
+  private sidesSwapped = false;
   private half: 1 | 2 = 1;
   private clockRunning = false;
   private cardBanner!: HTMLDivElement;
@@ -223,6 +225,7 @@ export class MatchScene extends Phaser.Scene {
     this.lastToucherSide = null;
     this.remainingSeconds = RULES.MATCH_MINUTES * 60;
     this.matchOver = false;
+    this.sidesSwapped = false;
     this.half = 1;
     this.clockRunning = false;
     this.lastFoulAt = -Infinity;
@@ -258,6 +261,7 @@ export class MatchScene extends Phaser.Scene {
     // A IA pode trocar de esquema no intervalo, igual um técnico de verdade.
     this.formationId[RULES.CPU_SIDE] = this.chooseAiFormation();
     this.formationBar.updateCpuFormation(this.formationId[RULES.CPU_SIDE]);
+    this.sidesSwapped = true; // os times trocam de lado no 2º tempo
     this.resetKickoff();
     this.scoreboard.showHalftime();
     this.showHalftimeMenu();
@@ -282,7 +286,7 @@ export class MatchScene extends Phaser.Scene {
   /** Fim do 1º tempo: escurece o jogo com "Voltar ao jogo" e "Gerenciamento de time". */
   private showHalftimeMenu(): void {
     this.pauseGame();
-    this.menu.show('Fim do 1º tempo', this.scoreLabel(), [
+    this.menu.show('Fim do 1º tempo', `${this.scoreLabel()} — os times trocam de lado no 2º tempo`, [
       { label: 'Voltar ao jogo', onClick: () => this.resumeGame() },
       {
         label: 'Gerenciamento de time',
@@ -557,8 +561,8 @@ export class MatchScene extends Phaser.Scene {
     const buttonColor = Phaser.Display.Color.HexStringToColor(team.kits[0].buttonColor).color;
 
     // home ataca para a direita: gol perto da borda, ataque perto do meio.
-    const goalX = side === 'home' ? FIELD.MARGIN + 34 : GAME.WIDTH - FIELD.MARGIN - 34;
-    const targetX = side === 'home' ? GAME.WIDTH * 0.46 : GAME.WIDTH * 0.54;
+    const goalX = this.attacksRight(side) ? FIELD.MARGIN + 34 : GAME.WIDTH - FIELD.MARGIN - 34;
+    const targetX = this.attacksRight(side) ? GAME.WIDTH * 0.46 : GAME.WIDTH * 0.54;
 
     // Linhas do campo (marcações): distribuímos DENTRO desse vão vertical.
     const fieldTop = FIELD.MARGIN;
@@ -578,7 +582,7 @@ export class MatchScene extends Phaser.Scene {
         const { player } = entry;
         const y = fieldTop + (span * (i + 1)) / (line.count + 1);
         // Camisas "adiantadas" (ex.: volante) ficam um pouco à frente da própria linha.
-        const forward = team.advanced?.includes(player.number) ? (side === 'home' ? 1 : -1) * 40 : 0;
+        const forward = team.advanced?.includes(player.number) ? (this.attacksRight(side) ? 1 : -1) * 40 : 0;
         const button = new ButtonEntity(this, x + forward, y, side, player, buttonColor);
         button.setYellowCards(this.yellowCounts[side].get(player.id) ?? 0);
         this.buttons.push(button);
@@ -675,7 +679,7 @@ export class MatchScene extends Phaser.Scene {
   private drawBench(side: TeamSide, bench: Player[], buttonColor: number): void {
     this.benchGfx[side]?.destroy();
     const y = GAME.HEIGHT - 26;
-    const centerX = side === 'home' ? GAME.WIDTH * 0.25 : GAME.WIDTH * 0.75;
+    const centerX = this.attacksRight(side) ? GAME.WIDTH * 0.25 : GAME.WIDTH * 0.75;
     const startX = centerX - ((bench.length - 1) * 30) / 2;
     const items: Phaser.GameObjects.GameObject[] = [];
     bench.forEach((player, i) => {
@@ -744,7 +748,7 @@ export class MatchScene extends Phaser.Scene {
 
   /** Centro do gol adversário do lado informado (para onde a IA mira). */
   private opponentGoalOf(side: TeamSide): { x: number; y: number } {
-    const x = side === 'home' ? GAME.WIDTH - FIELD.MARGIN : FIELD.MARGIN;
+    const x = this.attacksRight(side) ? GAME.WIDTH - FIELD.MARGIN : FIELD.MARGIN;
     return { x, y: GAME.HEIGHT / 2 };
   }
 
@@ -768,7 +772,7 @@ export class MatchScene extends Phaser.Scene {
       const fieldSpan = GAME.WIDTH - FIELD.MARGIN * 2;
       const reactDepth = fieldSpan * GOALKEEPER.REACT_ZONE_FRAC;
       const inZone =
-        side === 'home'
+        this.attacksRight(side)
           ? this.ball.position.x <= FIELD.MARGIN + reactDepth
           : this.ball.position.x >= GAME.WIDTH - FIELD.MARGIN - reactDepth;
 
@@ -810,13 +814,14 @@ export class MatchScene extends Phaser.Scene {
     const bottomLine = GAME.HEIGHT - FIELD.MARGIN;
 
     // Gol: só dentro da faixa da trave.
-    if (inGoalBand && x <= leftLine) return this.onGoal('away'); // gol contra o mandante
-    if (inGoalBand && x >= rightLine) return this.onGoal('home');
+    // Gol na esquerda = quem defende a direita marcou (e vice-versa).
+    if (inGoalBand && x <= leftLine) return this.onGoal(this.leftSide() === 'home' ? 'away' : 'home');
+    if (inGoalBand && x >= rightLine) return this.onGoal(this.leftSide());
 
     // Saiu pela linha de fundo fora da faixa da trave → escanteio/tiro de meta.
     // (Checado ANTES da lateral pra não perder o caso de saída bem no canto.)
-    if (!inGoalBand && x <= leftLine + PHYSICS.BALL_RADIUS) return this.deadBallOnGoalLine('home', y);
-    if (!inGoalBand && x >= rightLine - PHYSICS.BALL_RADIUS) return this.deadBallOnGoalLine('away', y);
+    if (!inGoalBand && x <= leftLine + PHYSICS.BALL_RADIUS) return this.deadBallOnGoalLine(this.leftSide(), y);
+    if (!inGoalBand && x >= rightLine - PHYSICS.BALL_RADIUS) return this.deadBallOnGoalLine(this.leftSide() === 'home' ? 'away' : 'home', y);
 
     // FORA pela lateral (topo/base) → tiro de lateral no ponto onde saiu.
     if (y <= topLine + PHYSICS.BALL_RADIUS) return this.throwInSide(x, topLine + PHYSICS.BALL_RADIUS + 2);
@@ -832,7 +837,7 @@ export class MatchScene extends Phaser.Scene {
    *   devolve pro defensor, perto do próprio gol.
    */
   private deadBallOnGoalLine(defendingSide: TeamSide, y: number): void {
-    const isLeft = defendingSide === 'home';
+    const isLeft = defendingSide === this.leftSide();
     const goalLineX = isLeft ? FIELD.MARGIN : GAME.WIDTH - FIELD.MARGIN;
     const inward = isLeft ? 1 : -1;
     const cy = GAME.HEIGHT / 2;
@@ -928,6 +933,16 @@ export class MatchScene extends Phaser.Scene {
     this.cameras.main.flash(300, 255, 255, 255);
     this.resetKickoff();
     console.log(`[GOL] ${this.homeTeam.shortName} ${this.score.home} x ${this.score.away} ${this.awayTeam.shortName}`);
+  }
+
+  /** O lado ataca pra direita? (home no 1º tempo; invertido depois da troca de lados.) */
+  private attacksRight(side: TeamSide): boolean {
+    return (side === 'home') !== this.sidesSwapped;
+  }
+
+  /** Quem defende o gol da esquerda no momento. */
+  private leftSide(): TeamSide {
+    return this.attacksRight('home') ? 'home' : 'away';
   }
 
   /** Devolve bola E botões às posições de chute inicial (formação atual). */
