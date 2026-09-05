@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
-import { GAME, FIELD, PHYSICS, RULES, FOULS, TOUCH_RULES, GOALKEEPER, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, type Difficulty, type TeamSide } from '@/config/constants';
+import { GAME, FIELD, PHYSICS, RULES, FOULS, GOALKEEPER, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, type Difficulty, type TeamSide } from '@/config/constants';
 import { ButtonEntity } from '@/entities/ButtonEntity';
 import { FlickController } from '@/systems/FlickController';
 import { AIController } from '@/systems/AIController';
-import { seedTeams, getOpponentIndex, setOpponentIndex, SEED_COUNT } from '@/data/seedTeams';
+import { seedTeams, SEED_LIST } from '@/data/seedTeams';
+import { loadSettings, saveSettings, type GameSettings } from '@/config/settings';
 import { FORMATIONS, getFormation, DEFAULT_FORMATION_ID, type Formation } from '@/data/formations';
 import { FormationBar } from '@/ui/FormationBar';
 import { Scoreboard } from '@/ui/Scoreboard';
@@ -12,6 +13,11 @@ import { LineupPanel, type LineupSlot } from '@/ui/LineupPanel';
 import { CodeBar } from '@/ui/CodeBar';
 import { DifficultyPicker } from '@/ui/DifficultyPicker';
 import { MatchMenu } from '@/ui/MatchMenu';
+import { SettingsPanel } from '@/ui/SettingsPanel';
+import { TeamSelect } from '@/ui/TeamSelect';
+
+// A tela de escolha de times abre sozinha só na 1ª vez que o jogo carrega.
+let teamScreenShown = false;
 import type { Team, Player, Position } from '@/models';
 
 /**
@@ -50,6 +56,14 @@ export class MatchScene extends Phaser.Scene {
   private codeBar!: CodeBar;
   private difficultyPicker!: DifficultyPicker;
   private menu!: MatchMenu;
+  private settingsPanel!: SettingsPanel;
+  private teamSelect!: TeamSelect;
+  /** O 1º peteleco já saiu — daí em diante não dá mais pra escolher os times. */
+  private matchStarted = false;
+  /** Personalizações atuais (times, cores, campo, regras) — relidas a cada (re)início. */
+  private settings: GameSettings = loadSettings();
+  /** Algum menu de tela cheia (intervalo/fim de jogo) está aberto. */
+  private menuShown = false;
   /** Nível de dificuldade — mantido entre reinícios e lembrado no navegador. */
   private difficulty: Difficulty = DIFFICULTIES.find((d) => d.id === DEFAULT_DIFFICULTY_ID)!;
   /** Reservas atuais por lado (atualizado a cada spawnTeam/substituição). */
@@ -58,7 +72,7 @@ export class MatchScene extends Phaser.Scene {
   private manualLineup: Player[] | null = null;
   /** Último lado a tocar a bola — decide escanteio (defensor) vs. tiro de meta (atacante). */
   private lastToucherSide: TeamSide | null = null;
-  private remainingSeconds = RULES.MATCH_MINUTES * 60;
+  private remainingSeconds = this.settings.halfMinutes * 60;
   private matchOver = false;
   /** true no 2º tempo: os times trocam de lado (home passa a atacar pra esquerda). */
   private sidesSwapped = false;
@@ -85,9 +99,16 @@ export class MatchScene extends Phaser.Scene {
     // A cena é reutilizada pelo scene.restart() (mesma instância) — os
     // campos abaixo têm inicializadores de classe que só rodam uma vez, na
     // primeira construção, então precisam ser resetados aqui manualmente.
+    this.settings = loadSettings();
     this.resetState();
 
-    const [home, away] = seedTeams();
+    const [home, away] = seedTeams(this.settings.homeTeam, this.settings.awayTeam);
+    home.kits[0].buttonColor = this.settings.homeColor;
+    away.kits[0].buttonColor = this.settings.awayColor;
+    // Cores parecidas: o adversário joga com a cor reserva pra dar pra distinguir.
+    const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const [ca, cb] = [rgb(home.kits[0].buttonColor), rgb(away.kits[0].buttonColor)];
+    if (Math.hypot(ca[0] - cb[0], ca[1] - cb[1], ca[2] - cb[2]) < 90) away.kits[0].buttonColor = away.kits[1].buttonColor;
     this.homeTeam = home;
     this.awayTeam = away;
     // A IA escolhe o próprio esquema tático (o jogador não mexe nele — ver FormationBar).
@@ -100,7 +121,7 @@ export class MatchScene extends Phaser.Scene {
     }
 
     this.matter.world.setBounds(0, 0, GAME.WIDTH, GAME.HEIGHT); // fallback
-    this.cameras.main.setBackgroundColor(GAME.BG_COLOR);
+    this.cameras.main.setBackgroundColor(this.settings.fieldColor);
 
     // Precisam existir ANTES do primeiro spawnTeam('home'), que já chama
     // refreshSubPanel()/refreshLineupPanel() pra popular as listas iniciais.
@@ -129,6 +150,20 @@ export class MatchScene extends Phaser.Scene {
     this.loadDifficulty();
     this.difficultyPicker = new DifficultyPicker(this.difficulty.id, (id) => this.setDifficulty(id));
     this.menu = new MatchMenu();
+    this.settingsPanel = new SettingsPanel(
+      () => this.openSettings(),
+      (s) => this.applySettings(s),
+      () => this.closeSettings(),
+    );
+    this.teamSelect = new TeamSelect(
+      () => this.openTeamSelect(true),
+      (h, a) => this.startWithTeams(h, a),
+      () => this.closeTeamSelect(),
+    );
+    if (!teamScreenShown) {
+      teamScreenShown = true;
+      this.openTeamSelect(false);
+    }
 
     this.setupZoomControls();
 
@@ -154,6 +189,8 @@ export class MatchScene extends Phaser.Scene {
       this.codeBar.destroy();
       this.difficultyPicker.destroy();
       this.menu.destroy();
+      this.settingsPanel.destroy();
+      this.teamSelect.destroy();
     });
   }
 
@@ -223,9 +260,10 @@ export class MatchScene extends Phaser.Scene {
     this.benchPlayers = { home: [], away: [] };
     this.manualLineup = null;
     this.lastToucherSide = null;
-    this.remainingSeconds = RULES.MATCH_MINUTES * 60;
+    this.remainingSeconds = this.settings.halfMinutes * 60;
     this.matchOver = false;
     this.sidesSwapped = false;
+    this.matchStarted = false;
     this.half = 1;
     this.clockRunning = false;
     this.lastFoulAt = -Infinity;
@@ -256,7 +294,7 @@ export class MatchScene extends Phaser.Scene {
   /** Fim do 1º tempo: reposiciona os times, zera o relógio pro 2º e pausa até o próximo peteleco. */
   private startSecondHalf(): void {
     this.half = 2;
-    this.remainingSeconds = RULES.MATCH_MINUTES * 60;
+    this.remainingSeconds = this.settings.halfMinutes * 60;
     this.clockRunning = false;
     // A IA pode trocar de esquema no intervalo, igual um técnico de verdade.
     this.formationId[RULES.CPU_SIDE] = this.chooseAiFormation();
@@ -276,6 +314,7 @@ export class MatchScene extends Phaser.Scene {
   private resumeGame(): void {
     this.matter.world.resume();
     this.time.paused = false;
+    this.menuShown = false;
     this.menu.hide();
   }
 
@@ -285,6 +324,7 @@ export class MatchScene extends Phaser.Scene {
 
   /** Fim do 1º tempo: escurece o jogo com "Voltar ao jogo" e "Gerenciamento de time". */
   private showHalftimeMenu(): void {
+    this.menuShown = true;
     this.pauseGame();
     this.menu.show('Fim do 1º tempo', `${this.scoreLabel()} — os times trocam de lado no 2º tempo`, [
       { label: 'Voltar ao jogo', onClick: () => this.resumeGame() },
@@ -302,6 +342,7 @@ export class MatchScene extends Phaser.Scene {
   /** Fim de jogo: Sair, Reiniciar e Reiniciar com outros times. */
   private showFinalMenu(): void {
     this.lineupPanel.hide();
+    this.menuShown = true;
     this.pauseGame();
     this.menu.show('Fim de jogo', this.scoreLabel(), [
       { label: 'Sair', onClick: () => this.showExitScreen() },
@@ -323,11 +364,49 @@ export class MatchScene extends Phaser.Scene {
 
   /** Sorteia outro adversário (Brasil segue sendo o time do jogador) e reinicia. */
   private restartWithOtherTeams(): void {
-    let next = getOpponentIndex();
-    if (SEED_COUNT > 2) {
-      while (next === getOpponentIndex()) next = 1 + Math.floor(Math.random() * (SEED_COUNT - 1));
+    const cur = this.settings;
+    let next = cur.awayTeam;
+    while (next === cur.awayTeam || next === cur.homeTeam) next = Math.floor(Math.random() * SEED_LIST.length);
+    saveSettings({ ...cur, awayTeam: next, awayColor: SEED_LIST[next].color });
+    this.restartMatch();
+  }
+
+  private openTeamSelect(canCancel: boolean): void {
+    if (this.matchStarted) return;
+    if (!this.menuShown) this.pauseGame();
+    this.teamSelect.open(this.settings.homeTeam, this.settings.awayTeam, canCancel);
+  }
+
+  private closeTeamSelect(): void {
+    this.teamSelect.hide();
+    if (!this.menuShown) this.resumeGame();
+  }
+
+  /** "Começar" da escolha de times: se mudou, salva (com as cores padrão) e reinicia. */
+  private startWithTeams(home: number, away: number): void {
+    const cur = this.settings;
+    if (home === cur.homeTeam && away === cur.awayTeam) {
+      this.closeTeamSelect();
+      return;
     }
-    setOpponentIndex(next);
+    saveSettings({ ...cur, homeTeam: home, awayTeam: away, homeColor: SEED_LIST[home].color, awayColor: SEED_LIST[away].color });
+    this.teamSelect.hide();
+    this.restartMatch();
+  }
+
+  private openSettings(): void {
+    if (!this.menuShown) this.pauseGame();
+    this.settingsPanel.open(this.settings);
+  }
+
+  private closeSettings(): void {
+    this.settingsPanel.hide();
+    if (!this.menuShown) this.resumeGame();
+  }
+
+  private applySettings(s: GameSettings): void {
+    saveSettings(s);
+    this.settingsPanel.hide();
     this.restartMatch();
   }
 
@@ -349,14 +428,14 @@ export class MatchScene extends Phaser.Scene {
   private drawTable(): void {
     const g = this.add.graphics().setDepth(0);
     // gramado da mesa
-    g.fillStyle(Phaser.Display.Color.HexStringToColor('#0f7a34').color, 1);
+    g.fillStyle(Phaser.Display.Color.HexStringToColor(this.settings.fieldColor).color, 1);
     g.fillRect(0, 0, GAME.WIDTH, GAME.HEIGHT);
     // faixas alternadas
     g.fillStyle(0xffffff, 0.03);
     for (let i = 0; i < GAME.WIDTH; i += 120) g.fillRect(i, 0, 60, GAME.HEIGHT);
 
     // linhas de marcação
-    g.lineStyle(FIELD.LINE_WIDTH, FIELD.LINE_COLOR, FIELD.LINE_ALPHA);
+    g.lineStyle(FIELD.LINE_WIDTH, Phaser.Display.Color.HexStringToColor(this.settings.lineColor).color, FIELD.LINE_ALPHA);
     g.strokeRect(FIELD.MARGIN, FIELD.MARGIN, GAME.WIDTH - FIELD.MARGIN * 2, GAME.HEIGHT - FIELD.MARGIN * 2);
     g.lineBetween(GAME.WIDTH / 2, FIELD.MARGIN, GAME.WIDTH / 2, GAME.HEIGHT - FIELD.MARGIN); // meio
     g.strokeCircle(GAME.WIDTH / 2, GAME.HEIGHT / 2, 90); // círculo central
@@ -409,7 +488,7 @@ export class MatchScene extends Phaser.Scene {
       frictionAir: PHYSICS.BALL_FRICTION_AIR,
       mass: PHYSICS.BALL_MASS,
     }) as MatterJS.BodyType;
-    this.ballGfx = this.add.circle(GAME.WIDTH / 2, GAME.HEIGHT / 2, PHYSICS.BALL_RADIUS, 0xffffff).setDepth(20);
+    this.ballGfx = this.add.circle(GAME.WIDTH / 2, GAME.HEIGHT / 2, PHYSICS.BALL_RADIUS, Phaser.Display.Color.HexStringToColor(this.settings.ballColor).color).setDepth(20);
   }
 
   /**
@@ -446,6 +525,7 @@ export class MatchScene extends Phaser.Scene {
    * acabou de ser petelecado contra o outro).
    */
   private checkFoul(bodyA: MatterJS.BodyType, bodyB: MatterJS.BodyType): void {
+    if (!this.settings.fouls) return;
     if (!bodyA.label.startsWith('button:') || !bodyB.label.startsWith('button:')) return;
     const btnA = this.buttons.find((b) => b.body === bodyA);
     const btnB = this.buttons.find((b) => b.body === bodyB);
@@ -728,6 +808,8 @@ export class MatchScene extends Phaser.Scene {
     }
     // Reseta o registro de toque deste peteleco — trackBallTouch() marca
     // se algum botão do time da posse encostou na bola durante o assentamento.
+    this.matchStarted = true;
+    this.teamSelect.setButtonVisible(false);
     this.touchedThisFlick = false;
     this.touchButtonIdThisFlick = null;
     // A posse é resolvida assim que o movimento cessar (checado no update()).
@@ -1026,9 +1108,9 @@ export class MatchScene extends Phaser.Scene {
   private updateTurnIndicator(): void {
     if (this.turn === RULES.CPU_SIDE) {
       const cpuTeam = RULES.CPU_SIDE === 'home' ? this.homeTeam : this.awayTeam;
-      this.scoreboard.updateTurn(`Vez d${cpuTeam.article === 'a' ? 'a' : 'o'} ${cpuTeam.name}...`);
+      this.scoreboard.updateTurn(`Vez ${{ o: 'do', a: 'da', os: 'dos' }[cpuTeam.article]} ${cpuTeam.name}...`);
     } else if (this.possessionTouches > 0) {
-      this.scoreboard.updateTurn(`Sua vez — toque de novo (${this.possessionTouches + 1}/${TOUCH_RULES.MAX_TOTAL})`);
+      this.scoreboard.updateTurn(`Sua vez — toque de novo (${this.possessionTouches + 1}/${this.settings.maxTouches})`);
     } else {
       this.scoreboard.updateTurn('Sua vez');
     }
@@ -1049,12 +1131,12 @@ export class MatchScene extends Phaser.Scene {
     }
     this.possessionTouches += 1;
 
-    if (this.sameButtonTouches > TOUCH_RULES.MAX_SAME_BUTTON) {
+    if (this.sameButtonTouches > this.settings.maxSameButton) {
       console.log(`[TOQUES] ${this.turn} perdeu a posse — ${this.sameButtonTouches} toques seguidos com o mesmo botão`);
       return false;
     }
-    if (this.possessionTouches >= TOUCH_RULES.MAX_TOTAL) {
-      console.log(`[TOQUES] ${this.turn} perdeu a posse — limite de ${TOUCH_RULES.MAX_TOTAL} toques na jogada`);
+    if (this.possessionTouches >= this.settings.maxTouches) {
+      console.log(`[TOQUES] ${this.turn} perdeu a posse — limite de ${this.settings.maxTouches} toques na jogada`);
       return false;
     }
     return true;

@@ -61,7 +61,7 @@ function kit(name: string, primary: string, secondary: string, button: string): 
 interface SeedDef {
   name: string;
   short: string;
-  article: 'o' | 'a'; // "o Brasil", "a Argentina" — gênero do nome do país em português
+  article: 'o' | 'a' | 'os'; // "o Brasil", "a Argentina", "os Estados Unidos" — artigo do nome do país
   country: string;
   primary: string;
   secondary: string;
@@ -69,15 +69,19 @@ interface SeedDef {
   rating: number;
 }
 
-// Brasil, Argentina + potências mundiais (nomes de seleção).
+// Seleções disponíveis (ordem alfabética, como aparece na escolha de times).
 const SEEDS: SeedDef[] = [
-  { name: 'Brasil', short: 'BRA', article: 'o', country: 'BR', primary: '#f7d417', secondary: '#0a4ea2', button: '#f7d417', rating: 92 },
-  { name: 'Argentina', short: 'ARG', article: 'a', country: 'AR', primary: '#6cc6e8', secondary: '#ffffff', button: '#6cc6e8', rating: 91 },
-  { name: 'França', short: 'FRA', article: 'a', country: 'FR', primary: '#1e3a8a', secondary: '#ffffff', button: '#1e3a8a', rating: 90 },
   { name: 'Alemanha', short: 'GER', article: 'a', country: 'DE', primary: '#ffffff', secondary: '#111111', button: '#dddddd', rating: 88 },
+  { name: 'Argentina', short: 'ARG', article: 'a', country: 'AR', primary: '#6cc6e8', secondary: '#ffffff', button: '#6cc6e8', rating: 91 },
+  { name: 'Bélgica', short: 'BEL', article: 'a', country: 'BE', primary: '#c8102e', secondary: '#fdda24', button: '#c8102e', rating: 87 },
+  { name: 'Brasil', short: 'BRA', article: 'o', country: 'BR', primary: '#f7d417', secondary: '#0a4ea2', button: '#f7d417', rating: 92 },
+  { name: 'Colômbia', short: 'COL', article: 'a', country: 'CO', primary: '#fcd116', secondary: '#003893', button: '#fcd116', rating: 84 },
+  { name: 'Coreia do Sul', short: 'KOR', article: 'a', country: 'KR', primary: '#cd2e3a', secondary: '#0047a0', button: '#cd2e3a', rating: 80 },
+  { name: 'Escócia', short: 'SCO', article: 'a', country: 'SC', primary: '#0065bd', secondary: '#ffffff', button: '#0065bd', rating: 78 },
   { name: 'Espanha', short: 'ESP', article: 'a', country: 'ES', primary: '#c60b1e', secondary: '#f7d417', button: '#c60b1e', rating: 87 },
+  { name: 'Estados Unidos', short: 'USA', article: 'os', country: 'US', primary: '#ffffff', secondary: '#1c3f94', button: '#1c3f94', rating: 80 },
+  { name: 'França', short: 'FRA', article: 'a', country: 'FR', primary: '#1e3a8a', secondary: '#ffffff', button: '#1e3a8a', rating: 90 },
   { name: 'Inglaterra', short: 'ENG', article: 'a', country: 'GB', primary: '#ffffff', secondary: '#0a4ea2', button: '#eeeeee', rating: 87 },
-  { name: 'Portugal', short: 'POR', article: 'o', country: 'PT', primary: '#006600', secondary: '#c60b1e', button: '#c60b1e', rating: 86 },
   { name: 'Itália', short: 'ITA', article: 'a', country: 'IT', primary: '#0a4ea2', secondary: '#ffffff', button: '#0a4ea2', rating: 85 },
 ];
 
@@ -102,18 +106,16 @@ export function buildSeedTeams(): Team[] {
   }));
 }
 
-// Índice do adversário no SEEDS (0 = Brasil, 1 = Argentina por padrão).
-let opponentIndex = 1;
-export function getOpponentIndex(): number {
-  return opponentIndex;
+/** Nome e cor padrão de cada seleção (pra telas de escolha/personalização). */
+/** Índice de uma seleção em SEED_LIST pela sigla (ex.: 'BRA'). */
+export function seedIndex(short: string): number {
+  return SEEDS.findIndex((t) => t.short === short);
 }
-export function setOpponentIndex(i: number): void {
-  opponentIndex = i;
-}
-export const SEED_COUNT = SEEDS.length;
 
-/** Retorna dois times para uma partida rápida (Brasil x adversário atual, Argentina por padrão). */
-export function seedTeams(): [Team, Team] {
+export const SEED_LIST = SEEDS.map((t) => ({ name: t.name, short: t.short, color: t.button, secondary: t.secondary }));
+
+/** Retorna os dois times da partida (índices em SEED_LIST; padrão: Brasil x Argentina). */
+export function seedTeams(homeIndex = seedIndex('BRA'), awayIndex = seedIndex('ARG')): [Team, Team] {
   const all = buildSeedTeams();
-  return [all[0], all[opponentIndex]];
+  return [all[homeIndex], all[awayIndex]];
 }
