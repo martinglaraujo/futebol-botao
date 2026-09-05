@@ -1,8 +1,8 @@
 import { DIFFICULTIES } from '@/config/constants';
 
 /**
- * Seletor de nível de dificuldade (DOM overlay, canto superior direito,
- * logo abaixo do rótulo do time da CPU). Muda a IA e o goleiro na hora.
+ * Seletor de nível de dificuldade (DOM overlay, canto superior esquerdo,
+ * logo abaixo do rótulo do time do jogador). Muda a IA e o goleiro na hora.
  */
 export class DifficultyPicker {
   private root: HTMLLabelElement;
@@ -15,7 +15,7 @@ export class DifficultyPicker {
     Object.assign(this.root.style, {
       position: 'fixed',
       top: '44px',
-      right: '10px',
+      left: '10px',
       zIndex: '11',
       display: 'flex',
       alignItems: 'center',

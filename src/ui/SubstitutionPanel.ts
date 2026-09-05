@@ -16,7 +16,7 @@ export class SubstitutionPanel {
     this.root = document.createElement('div');
     Object.assign(this.root.style, {
       position: 'fixed',
-      top: '64px',
+      top: '76px',
       left: '10px',
       zIndex: '11',
       fontFamily: 'system-ui, sans-serif',
