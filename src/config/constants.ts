@@ -101,7 +101,7 @@ export const DIFFICULTIES: Difficulty[] = [
   { id: 'pro', label: 'Pro', aimErrorDeg: 11, forceFactor: 1.0, gkSpeed: 3 },
   { id: 'experiente', label: 'Experiente', aimErrorDeg: 7, forceFactor: 1.05, gkSpeed: 3.6 },
   { id: 'mestre', label: 'Mestre', aimErrorDeg: 4, forceFactor: 1.1, gkSpeed: 4.3 },
-  { id: 'lenda', label: 'Lenda', aimErrorDeg: 1.5, forceFactor: 1.2, gkSpeed: 5 },
+  { id: 'legend', label: 'Legend', aimErrorDeg: 1.5, forceFactor: 1.2, gkSpeed: 5 },
 ];
 export const DEFAULT_DIFFICULTY_ID = 'pro';
 
