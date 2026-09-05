@@ -3,7 +3,7 @@ import { GAME, FIELD, PHYSICS, RULES, FOULS, TOUCH_RULES, GOALKEEPER, DIFFICULTI
 import { ButtonEntity } from '@/entities/ButtonEntity';
 import { FlickController } from '@/systems/FlickController';
 import { AIController } from '@/systems/AIController';
-import { seedTeams } from '@/data/seedTeams';
+import { seedTeams, getOpponentIndex, setOpponentIndex, SEED_COUNT } from '@/data/seedTeams';
 import { FORMATIONS, getFormation, DEFAULT_FORMATION_ID, type Formation } from '@/data/formations';
 import { FormationBar } from '@/ui/FormationBar';
 import { Scoreboard } from '@/ui/Scoreboard';
@@ -11,6 +11,7 @@ import { SubstitutionPanel } from '@/ui/SubstitutionPanel';
 import { LineupPanel, type LineupSlot } from '@/ui/LineupPanel';
 import { CodeBar } from '@/ui/CodeBar';
 import { DifficultyPicker } from '@/ui/DifficultyPicker';
+import { MatchMenu } from '@/ui/MatchMenu';
 import type { Team, Player, Position } from '@/models';
 
 /**
@@ -48,6 +49,7 @@ export class MatchScene extends Phaser.Scene {
   private lineupPanel!: LineupPanel;
   private codeBar!: CodeBar;
   private difficultyPicker!: DifficultyPicker;
+  private menu!: MatchMenu;
   /** Nível de dificuldade — mantido entre reinícios e lembrado no navegador. */
   private difficulty: Difficulty = DIFFICULTIES.find((d) => d.id === DEFAULT_DIFFICULTY_ID)!;
   /** Reservas atuais por lado (atualizado a cada spawnTeam/substituição). */
@@ -124,6 +126,7 @@ export class MatchScene extends Phaser.Scene {
     this.ai = new AIController(this);
     this.loadDifficulty();
     this.difficultyPicker = new DifficultyPicker(this.difficulty.id, (id) => this.setDifficulty(id));
+    this.menu = new MatchMenu();
 
     this.setupZoomControls();
 
@@ -148,6 +151,7 @@ export class MatchScene extends Phaser.Scene {
       this.lineupPanel.destroy();
       this.codeBar.destroy();
       this.difficultyPicker.destroy();
+      this.menu.destroy();
     });
   }
 
@@ -256,6 +260,71 @@ export class MatchScene extends Phaser.Scene {
     this.formationBar.updateCpuFormation(this.formationId[RULES.CPU_SIDE]);
     this.resetKickoff();
     this.scoreboard.showHalftime();
+    this.showHalftimeMenu();
+  }
+
+  /** Pausa física e relógios (bola, botões, IA e cronômetro) enquanto um menu está aberto. */
+  private pauseGame(): void {
+    this.matter.world.pause();
+    this.time.paused = true;
+  }
+
+  private resumeGame(): void {
+    this.matter.world.resume();
+    this.time.paused = false;
+    this.menu.hide();
+  }
+
+  private scoreLabel(): string {
+    return `${this.homeTeam.shortName} ${this.score.home} x ${this.score.away} ${this.awayTeam.shortName}`;
+  }
+
+  /** Fim do 1º tempo: escurece o jogo com "Voltar ao jogo" e "Gerenciamento de time". */
+  private showHalftimeMenu(): void {
+    this.pauseGame();
+    this.menu.show('Fim do 1º tempo', this.scoreLabel(), [
+      { label: 'Voltar ao jogo', onClick: () => this.resumeGame() },
+      {
+        label: 'Gerenciamento de time',
+        onClick: () => {
+          // Mantém o jogo escurecido e pausado; abre a escalação e deixa só o "Voltar ao jogo".
+          this.lineupPanel.show();
+          this.menu.showBottomButton({ label: 'Voltar ao jogo', onClick: () => this.resumeGame() });
+        },
+      },
+    ]);
+  }
+
+  /** Fim de jogo: Sair, Reiniciar e Reiniciar com outros times. */
+  private showFinalMenu(): void {
+    this.lineupPanel.hide();
+    this.pauseGame();
+    this.menu.show('Fim de jogo', this.scoreLabel(), [
+      { label: 'Sair', onClick: () => this.showExitScreen() },
+      { label: 'Reiniciar', onClick: () => this.restartMatch() },
+      { label: 'Reiniciar com outros times', onClick: () => this.restartWithOtherTeams() },
+    ]);
+  }
+
+  private showExitScreen(): void {
+    this.menu.show('Partida encerrada', 'Obrigado por jogar!', [
+      { label: 'Jogar de novo', onClick: () => this.restartMatch() },
+    ]);
+  }
+
+  private restartMatch(): void {
+    this.resumeGame();
+    this.scene.restart();
+  }
+
+  /** Sorteia outro adversário (Brasil segue sendo o time do jogador) e reinicia. */
+  private restartWithOtherTeams(): void {
+    let next = getOpponentIndex();
+    if (SEED_COUNT > 2) {
+      while (next === getOpponentIndex()) next = 1 + Math.floor(Math.random() * (SEED_COUNT - 1));
+    }
+    setOpponentIndex(next);
+    this.restartMatch();
   }
 
   /** Sorteia um esquema tático pra IA usar (ela decide sozinha, sem o jogador poder mexer). */
@@ -268,6 +337,7 @@ export class MatchScene extends Phaser.Scene {
     this.matchOver = true;
     this.flick.enabled = false;
     this.scoreboard.showFullTime();
+    this.showFinalMenu();
   }
 
   // ---------- Construção do campo ----------

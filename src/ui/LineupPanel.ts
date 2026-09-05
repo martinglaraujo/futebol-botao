@@ -154,9 +154,19 @@ export class LineupPanel {
     this.hidePanel();
   }
 
+  /** Abre o painel (usado pelo "Gerenciamento de time" do intervalo). */
+  show(): void {
+    this.open = true;
+    this.panel.style.display = 'flex';
+  }
+
   private togglePanel(): void {
     this.open = !this.open;
     this.panel.style.display = this.open ? 'flex' : 'none';
+  }
+
+  hide(): void {
+    this.hidePanel();
   }
 
   private hidePanel(): void {

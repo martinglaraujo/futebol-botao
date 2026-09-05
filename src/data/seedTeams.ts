@@ -102,8 +102,18 @@ export function buildSeedTeams(): Team[] {
   }));
 }
 
-/** Retorna dois times para uma partida rápida (Brasil x Argentina por padrão). */
+// Índice do adversário no SEEDS (0 = Brasil, 1 = Argentina por padrão).
+let opponentIndex = 1;
+export function getOpponentIndex(): number {
+  return opponentIndex;
+}
+export function setOpponentIndex(i: number): void {
+  opponentIndex = i;
+}
+export const SEED_COUNT = SEEDS.length;
+
+/** Retorna dois times para uma partida rápida (Brasil x adversário atual, Argentina por padrão). */
 export function seedTeams(): [Team, Team] {
   const all = buildSeedTeams();
-  return [all[0], all[1]];
+  return [all[0], all[opponentIndex]];
 }
