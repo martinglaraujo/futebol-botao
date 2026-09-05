@@ -14,8 +14,17 @@ const SQUAD_TEMPLATE: Position[] = [
   'ATA', 'ATA', 'ATA',
 ];
 
-function makeSquad(prefix: string): Player[] {
-  return SQUAD_TEMPLATE.map((position, i) => {
+// Elenco do Brasil definido pelo usuário (número da camisa → posição).
+const BRASIL_POSITIONS: Record<number, Position> = {
+  1: 'GOL', 2: 'GOL',
+  3: 'ZAG', 4: 'ZAG', 11: 'ZAG', 12: 'ZAG', 16: 'ZAG',
+  5: 'MEI', 6: 'MEI', 8: 'MEI', 13: 'MEI', 14: 'MEI', 15: 'MEI',
+  7: 'ATA', 9: 'ATA', 10: 'ATA',
+};
+
+function makeSquad(prefix: string, positionByNumber?: Record<number, Position>): Player[] {
+  return SQUAD_TEMPLATE.map((templatePosition, i) => {
+    const position = positionByNumber?.[i + 1] ?? templatePosition;
     const p: Player = {
       id: uid('ply_'),
       name: `${prefix} ${i + 1}`,
@@ -85,7 +94,7 @@ export function buildSeedTeams(): Team[] {
       kit('Titular', s.primary, s.secondary, s.button),
       kit('Reserva', s.secondary, s.primary, s.secondary),
     ],
-    squad: makeSquad(s.short),
+    squad: makeSquad(s.short, s.short === 'BRA' ? BRASIL_POSITIONS : undefined),
     rating: s.rating,
   }));
 }
