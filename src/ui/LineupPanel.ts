@@ -23,7 +23,7 @@ export class LineupPanel {
     this.root = document.createElement('div');
     Object.assign(this.root.style, {
       position: 'fixed',
-      top: '64px',
+      top: '80px',
       left: '10px',
       zIndex: '11',
       fontFamily: 'system-ui, sans-serif',
