@@ -730,9 +730,14 @@ export class MatchScene extends Phaser.Scene {
 
     const attackingSide: TeamSide = defendingSide === 'home' ? 'away' : 'home';
     let pos: { x: number; y: number };
+    let takerAt: { x: number; y: number } | undefined;
     if (this.lastToucherSide === defendingSide) {
-      const cornerY = y < cy ? FIELD.MARGIN + 50 : GAME.HEIGHT - FIELD.MARGIN - 50;
-      pos = { x: goalLineX + inward * 50, y: cornerY }; // escanteio
+      // Escanteio como a lateral: bola um pouco dentro do campo e o batedor do
+      // lado do canto, empurrando pra dentro.
+      const top = y < cy;
+      const cornerY = top ? FIELD.MARGIN + 60 : GAME.HEIGHT - FIELD.MARGIN - 60;
+      pos = { x: goalLineX + inward * 60, y: cornerY }; // escanteio
+      takerAt = { x: pos.x - inward * 30, y: cornerY + (top ? -30 : 30) };
       this.announceRestart('ESCANTEIO', attackingSide);
     } else {
       pos = { x: goalLineX + inward * 130, y: cy }; // tiro de meta (longe o bastante do goleiro pro batedor caber atrás)
@@ -744,7 +749,7 @@ export class MatchScene extends Phaser.Scene {
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
     this.resetPossessionTouches(); // bola saiu de jogo — reinicia a contagem de toques
-    if (this.restartAwardedTo) this.placeTakerBehindBall(this.restartAwardedTo);
+    if (this.restartAwardedTo) this.placeTakerBehindBall(this.restartAwardedTo, takerAt);
   }
 
   /** FORA: bola saiu pela lateral (topo/base) — reposiciona no ponto de saída (tiro de lateral). */
