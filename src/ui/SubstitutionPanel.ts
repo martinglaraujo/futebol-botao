@@ -29,8 +29,9 @@ export class SubstitutionPanel {
       background: 'rgba(0,0,0,0.55)',
       color: '#fff',
       border: '1px solid rgba(255,255,255,0.4)',
-      borderRadius: '6px',
-      padding: '4px 8px',
+      borderRadius: '5px',
+      padding: '2px 6px',
+      fontSize: '11px',
       cursor: 'pointer',
     });
     toggleBtn.addEventListener('click', () => this.togglePanel());
@@ -45,7 +46,8 @@ export class SubstitutionPanel {
       flexDirection: 'column',
       gap: '6px',
       color: '#fff',
-      minWidth: '190px',
+      minWidth: '170px',
+      fontSize: '11px',
       backdropFilter: 'blur(2px)',
     });
 
@@ -85,7 +87,8 @@ export class SubstitutionPanel {
     const select = document.createElement('select');
     Object.assign(select.style, {
       width: '100%',
-      padding: '3px 4px',
+      padding: '2px 3px',
+      fontSize: '11px',
       borderRadius: '4px',
       background: '#0f7a34',
       color: '#fff',
