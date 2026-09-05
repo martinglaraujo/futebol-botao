@@ -23,7 +23,7 @@ export class LineupPanel {
     this.root = document.createElement('div');
     Object.assign(this.root.style, {
       position: 'fixed',
-      top: '68px',
+      top: '64px',
       left: '10px',
       zIndex: '11',
       fontFamily: 'system-ui, sans-serif',
@@ -36,8 +36,9 @@ export class LineupPanel {
       background: 'rgba(0,0,0,0.55)',
       color: '#fff',
       border: '1px solid rgba(255,255,255,0.4)',
-      borderRadius: '6px',
-      padding: '4px 8px',
+      borderRadius: '5px',
+      padding: '2px 6px',
+      fontSize: '11px',
       cursor: 'pointer',
     });
     toggleBtn.addEventListener('click', () => this.togglePanel());
@@ -52,7 +53,8 @@ export class LineupPanel {
       flexDirection: 'column',
       gap: '4px',
       color: '#fff',
-      minWidth: '210px',
+      minWidth: '170px',
+      fontSize: '11px',
       maxHeight: '60vh',
       overflowY: 'auto',
       backdropFilter: 'blur(2px)',
@@ -103,7 +105,7 @@ export class LineupPanel {
       const label = document.createElement('span');
       label.textContent = totalOfRole > 1 ? `${slot.role} ${n}` : slot.role;
       label.style.opacity = '0.75';
-      label.style.fontSize = '11px';
+      label.style.fontSize = '10px';
 
       const select = this.buildSelect();
       this.fillOptions(select, squad, currentIds[i]);
@@ -117,7 +119,8 @@ export class LineupPanel {
     const select = document.createElement('select');
     Object.assign(select.style, {
       width: '100%',
-      padding: '3px 4px',
+      padding: '2px 3px',
+      fontSize: '11px',
       borderRadius: '4px',
       background: '#0f7a34',
       color: '#fff',
