@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { AI, PHYSICS } from '@/config/constants';
+import { AI, PHYSICS, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, type Difficulty } from '@/config/constants';
 import type { ButtonEntity } from '@/entities/ButtonEntity';
 
 /**
@@ -9,6 +9,9 @@ import type { ButtonEntity } from '@/entities/ButtonEntity';
  * jogador; a precisão da mira degrada conforme `control` é menor.
  */
 export class AIController {
+  /** Nível atual (troca em tempo real pelo seletor de dificuldade). */
+  difficulty: Difficulty = DIFFICULTIES.find((d) => d.id === DEFAULT_DIFFICULTY_ID)!;
+
   constructor(private scene: Phaser.Scene) {}
 
   playTurn(
@@ -54,7 +57,7 @@ export class AIController {
 
     // Erro de ângulo: 0 com control=100, até MAX_AIM_ERROR_DEG com control=0.
     const control = striker.player.attributes.control; // 0..100
-    const maxErrorRad = Phaser.Math.DegToRad(AI.MAX_AIM_ERROR_DEG) * (1 - control / 100);
+    const maxErrorRad = Phaser.Math.DegToRad(this.difficulty.aimErrorDeg) * (1 - control / 100);
     const errorRad = Phaser.Math.FloatBetween(-maxErrorRad, maxErrorRad);
     const cos = Math.cos(errorRad);
     const sin = Math.sin(errorRad);
@@ -64,7 +67,7 @@ export class AIController {
     const ny = ux * sin + uy * cos;
 
     const powerFactor = 0.6 + striker.player.attributes.power / 100; // 0.6..1.6
-    const force = PHYSICS.FLICK_MAX_FORCE * AI.FORCE_FACTOR * powerFactor;
+    const force = PHYSICS.FLICK_MAX_FORCE * this.difficulty.forceFactor * powerFactor;
 
     // Pequena pausa de "pensamento" antes de bater — evita reação instantânea.
     this.scene.time.delayedCall(Phaser.Math.Between(AI.THINK_MS_MIN, AI.THINK_MS_MAX), () => {

@@ -83,6 +83,28 @@ export const GOALKEEPER = {
   DEADBAND: 4, // se já está a menos disso do alvo, para (evita tremedeira perpétua)
 } as const;
 
+// --- Dificuldade ---
+// Cada nível ajusta a mira/força da IA e a velocidade do goleiro (os dois lados).
+// "Pro" é o ajuste original do jogo.
+export interface Difficulty {
+  id: string;
+  label: string;
+  aimErrorDeg: number; // erro máx. de ângulo da IA (com control=0)
+  forceFactor: number; // fração do peteleco máximo usada pela IA
+  gkSpeed: number; // velocidade lateral máx. do goleiro
+}
+
+export const DIFFICULTIES: Difficulty[] = [
+  { id: 'iniciante', label: 'Iniciante', aimErrorDeg: 30, forceFactor: 0.7, gkSpeed: 1.5 },
+  { id: 'amador', label: 'Amador', aimErrorDeg: 22, forceFactor: 0.8, gkSpeed: 2 },
+  { id: 'semipro', label: 'Semipro', aimErrorDeg: 16, forceFactor: 0.9, gkSpeed: 2.5 },
+  { id: 'pro', label: 'Pro', aimErrorDeg: 11, forceFactor: 1.0, gkSpeed: 3 },
+  { id: 'experiente', label: 'Experiente', aimErrorDeg: 7, forceFactor: 1.05, gkSpeed: 3.6 },
+  { id: 'mestre', label: 'Mestre', aimErrorDeg: 4, forceFactor: 1.1, gkSpeed: 4.3 },
+  { id: 'lenda', label: 'Lenda', aimErrorDeg: 1.5, forceFactor: 1.2, gkSpeed: 5 },
+];
+export const DEFAULT_DIFFICULTY_ID = 'pro';
+
 // --- IA ---
 export const AI = {
   THINK_MS_MIN: 500, // pausa mínima antes do peteleco (parece "pensar")

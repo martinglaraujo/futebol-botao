@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, FIELD, PHYSICS, RULES, FOULS, TOUCH_RULES, GOALKEEPER, type TeamSide } from '@/config/constants';
+import { GAME, FIELD, PHYSICS, RULES, FOULS, TOUCH_RULES, GOALKEEPER, DIFFICULTIES, DEFAULT_DIFFICULTY_ID, type Difficulty, type TeamSide } from '@/config/constants';
 import { ButtonEntity } from '@/entities/ButtonEntity';
 import { FlickController } from '@/systems/FlickController';
 import { AIController } from '@/systems/AIController';
@@ -10,6 +10,7 @@ import { Scoreboard } from '@/ui/Scoreboard';
 import { SubstitutionPanel } from '@/ui/SubstitutionPanel';
 import { LineupPanel, type LineupSlot } from '@/ui/LineupPanel';
 import { CodeBar } from '@/ui/CodeBar';
+import { DifficultyPicker } from '@/ui/DifficultyPicker';
 import type { Team, Player, Position } from '@/models';
 
 /**
@@ -46,6 +47,9 @@ export class MatchScene extends Phaser.Scene {
   private subPanel!: SubstitutionPanel;
   private lineupPanel!: LineupPanel;
   private codeBar!: CodeBar;
+  private difficultyPicker!: DifficultyPicker;
+  /** Nível de dificuldade — mantido entre reinícios e lembrado no navegador. */
+  private difficulty: Difficulty = DIFFICULTIES.find((d) => d.id === DEFAULT_DIFFICULTY_ID)!;
   /** Reservas atuais por lado (atualizado a cada spawnTeam/substituição). */
   private benchPlayers: Record<TeamSide, Player[]> = { home: [], away: [] };
   /** Escalação manual do home (uma entrada por vaga do esquema, na ordem de formation.lines) — null = automático. */
@@ -118,6 +122,8 @@ export class MatchScene extends Phaser.Scene {
       () => this.onFlickResolved(),
     );
     this.ai = new AIController(this);
+    this.loadDifficulty();
+    this.difficultyPicker = new DifficultyPicker(this.difficulty.id, (id) => this.setDifficulty(id));
 
     this.setupZoomControls();
 
@@ -141,7 +147,32 @@ export class MatchScene extends Phaser.Scene {
       this.subPanel.destroy();
       this.lineupPanel.destroy();
       this.codeBar.destroy();
+      this.difficultyPicker.destroy();
     });
+  }
+
+  private loadDifficulty(): void {
+    try {
+      const saved = localStorage.getItem('botaofc.difficulty');
+      const found = DIFFICULTIES.find((d) => d.id === saved);
+      if (found) this.difficulty = found;
+    } catch {
+      /* sem acesso ao armazenamento local — segue com o nível atual */
+    }
+    this.ai.difficulty = this.difficulty;
+  }
+
+  private setDifficulty(id: string): void {
+    const found = DIFFICULTIES.find((d) => d.id === id);
+    if (!found) return;
+    this.difficulty = found;
+    this.ai.difficulty = found;
+    try {
+      localStorage.setItem('botaofc.difficulty', id);
+    } catch {
+      /* ignora */
+    }
+    console.log(`[NÍVEL] ${found.label}`);
   }
 
   /** Recoloca só a bola no centro do campo (resgate manual via CodeBar). */
@@ -678,7 +709,7 @@ export class MatchScene extends Phaser.Scene {
       if (Math.abs(diff) < GOALKEEPER.DEADBAND) {
         this.matter.body.setVelocity(gk.body, { x: gk.body.velocity.x, y: 0 });
       } else {
-        const vy = Phaser.Math.Clamp(diff * 0.15, -GOALKEEPER.MAX_SPEED, GOALKEEPER.MAX_SPEED);
+        const vy = Phaser.Math.Clamp(diff * 0.15, -this.difficulty.gkSpeed, this.difficulty.gkSpeed);
         this.matter.body.setVelocity(gk.body, { x: gk.body.velocity.x, y: vy });
       }
     }
