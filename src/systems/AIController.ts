@@ -23,7 +23,13 @@ export class AIController {
       return;
     }
 
-    const striker = active.reduce((closest, b) =>
+    // Prefere botões ATRÁS da bola (do lado do próprio gol): quem está na
+    // frente dela, ao contornar pro ponto de mira, empurra a bola pra própria área.
+    const dir = Math.sign(opponentGoal.x - ball.position.x) || 1;
+    // Tolerância: quem está na altura da bola (ex.: batedor de lateral) também vale.
+    const behind = active.filter((b) => (ball.position.x - b.body.position.x) * dir > -PHYSICS.BUTTON_RADIUS * 2);
+    const pool = behind.length > 0 ? behind : active;
+    const striker = pool.reduce((closest, b) =>
       Phaser.Math.Distance.BetweenPoints(b.body.position, ball.position) <
       Phaser.Math.Distance.BetweenPoints(closest.body.position, ball.position)
         ? b
@@ -36,8 +42,11 @@ export class AIController {
     const toGoalY = opponentGoal.y - ball.position.y;
     const toGoalLen = Math.hypot(toGoalX, toGoalY) || 1;
     const contactDist = PHYSICS.BALL_RADIUS + PHYSICS.BUTTON_RADIUS + 2;
-    const ghostX = ball.position.x - (toGoalX / toGoalLen) * contactDist;
-    const ghostY = ball.position.y - (toGoalY / toGoalLen) * contactDist;
+    // Batedor colado na bola (jogada parada): mira direto nela, senão contornaria pro ponto fantasma e erraria.
+    const dToBall = Phaser.Math.Distance.BetweenPoints(striker.body.position, ball.position);
+    const reach = dToBall < 70 ? 8 : contactDist;
+    const ghostX = ball.position.x - (toGoalX / toGoalLen) * reach;
+    const ghostY = ball.position.y - (toGoalY / toGoalLen) * reach;
 
     const aimX = ghostX - striker.body.position.x;
     const aimY = ghostY - striker.body.position.y;

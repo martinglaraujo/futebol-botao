@@ -195,6 +195,7 @@ export class MatchScene extends Phaser.Scene {
     this.awaitingRest = false;
     this.awaitingRestSince = 0;
     this.ballDeadFrames = 0;
+    this.restartAwardedTo = null;
   }
 
   /** Cronômetro regressivo — só corre depois do chute inicial de cada tempo. */
@@ -367,14 +368,31 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private showCardBanner(offender: ButtonEntity, kind: 'yellow' | 'red'): void {
-    this.cardBanner.style.background = kind === 'yellow' ? '#f4d03f' : '#e74c3c';
-    this.cardBanner.style.color = kind === 'yellow' ? '#111' : '#fff';
     const label = kind === 'yellow' ? 'CARTÃO AMARELO' : 'CARTÃO VERMELHO — EXPULSO';
-    this.cardBanner.textContent = `${label}: ${offender.player.name}`;
+    this.showBanner(
+      `${label}: ${offender.player.name}`,
+      kind === 'yellow' ? '#f4d03f' : '#e74c3c',
+      kind === 'yellow' ? '#111' : '#fff',
+    );
+  }
+
+  /** Faixa transitória no topo (cartões, lateral, escanteio, tiro de meta). */
+  private showBanner(text: string, background: string, color: string): void {
+    this.cardBanner.style.background = background;
+    this.cardBanner.style.color = color;
+    this.cardBanner.textContent = text;
     this.cardBanner.style.opacity = '1';
     this.time.delayedCall(2200, () => {
       this.cardBanner.style.opacity = '0';
     });
+  }
+
+  /** Bola parada por regra: avisa na tela e define quem bate quando o jogo assentar. */
+  private announceRestart(label: string, awardedTo: TeamSide): void {
+    this.restartAwardedTo = awardedTo;
+    const team = awardedTo === 'home' ? this.homeTeam : this.awayTeam;
+    this.showBanner(`${label} — ${team.shortName}`, '#1e6fd9', '#fff');
+    console.log(`[${label}] posse: ${awardedTo}`);
   }
 
   /** Escolhe os titulares para as vagas do esquema; o resto vira banco. */
@@ -710,12 +728,15 @@ export class MatchScene extends Phaser.Scene {
     const inward = isLeft ? 1 : -1;
     const cy = GAME.HEIGHT / 2;
 
+    const attackingSide: TeamSide = defendingSide === 'home' ? 'away' : 'home';
     let pos: { x: number; y: number };
     if (this.lastToucherSide === defendingSide) {
-      const cornerY = y < cy ? FIELD.MARGIN + 14 : GAME.HEIGHT - FIELD.MARGIN - 14;
-      pos = { x: goalLineX + inward * 14, y: cornerY }; // escanteio
+      const cornerY = y < cy ? FIELD.MARGIN + 50 : GAME.HEIGHT - FIELD.MARGIN - 50;
+      pos = { x: goalLineX + inward * 50, y: cornerY }; // escanteio
+      this.announceRestart('ESCANTEIO', attackingSide);
     } else {
-      pos = { x: goalLineX + inward * 70, y: cy }; // tiro de meta
+      pos = { x: goalLineX + inward * 130, y: cy }; // tiro de meta (longe o bastante do goleiro pro batedor caber atrás)
+      this.announceRestart('TIRO DE META', defendingSide);
     }
 
     this.matter.body.setPosition(this.ball, pos);
@@ -723,16 +744,57 @@ export class MatchScene extends Phaser.Scene {
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
     this.resetPossessionTouches(); // bola saiu de jogo — reinicia a contagem de toques
+    if (this.restartAwardedTo) this.placeTakerBehindBall(this.restartAwardedTo);
   }
 
   /** FORA: bola saiu pela lateral (topo/base) — reposiciona no ponto de saída (tiro de lateral). */
   private throwInSide(x: number, y: number): void {
     const clampedX = Phaser.Math.Clamp(x, FIELD.MARGIN + 20, GAME.WIDTH - FIELD.MARGIN - 20);
-    this.matter.body.setPosition(this.ball, { x: clampedX, y });
+    // Lateral de verdade: a bola volta um pouco pra DENTRO do campo (não colada
+    // na parede) e o batedor fica do lado da linha, empurrando pra dentro.
+    const fromTop = y < GAME.HEIGHT / 2;
+    const ballY = fromTop ? FIELD.MARGIN + 60 : GAME.HEIGHT - FIELD.MARGIN - 60;
+    this.matter.body.setPosition(this.ball, { x: clampedX, y: ballY });
     this.matter.body.setVelocity(this.ball, { x: 0, y: 0 });
     this.matter.body.setAngularVelocity(this.ball, 0);
     this.ballDeadFrames = 6;
     this.resetPossessionTouches();
+    // Lateral é de quem NÃO tocou por último (sem registro de toque: quem estava com a posse perde).
+    const lastTouch = this.lastToucherSide ?? this.turn;
+    this.announceRestart('LATERAL', lastTouch === 'home' ? 'away' : 'home');
+    if (this.restartAwardedTo) {
+      this.placeTakerBehindBall(this.restartAwardedTo, { x: clampedX, y: fromTop ? ballY - 42 : ballY + 42 });
+    }
+  }
+
+  /**
+   * Bola parada: põe o botão (não-goleiro) mais próximo do time com direito
+   * ATRÁS da bola, na linha do gol adversário — quem bate sempre tem espaço
+   * pra empurrar a bola pra frente, nunca pra própria área.
+   */
+  private placeTakerBehindBall(side: TeamSide, at?: { x: number; y: number }): void {
+    const goal = this.opponentGoalOf(side);
+    const { x: bx, y: by } = this.ball.position;
+    let ux = goal.x - bx;
+    let uy = goal.y - by;
+    const len = Math.hypot(ux, uy) || 1;
+    ux /= len;
+    uy /= len;
+
+    const cands = this.buttons.filter((b) => b.side === side && !b.sentOff && b.player.position !== 'GOL');
+    if (cands.length === 0) return;
+    const taker = cands.reduce((c, b) =>
+      Phaser.Math.Distance.Between(b.body.position.x, b.body.position.y, bx, by) <
+      Phaser.Math.Distance.Between(c.body.position.x, c.body.position.y, bx, by)
+        ? b
+        : c,
+    );
+    const pad = FIELD.MARGIN + PHYSICS.BUTTON_RADIUS + 5;
+    const tx = Phaser.Math.Clamp(at ? at.x : bx - ux * 60, pad, GAME.WIDTH - pad);
+    const ty = Phaser.Math.Clamp(at ? at.y : by - uy * 60, pad, GAME.HEIGHT - pad);
+    taker.body.isSleeping = false;
+    this.matter.body.setPosition(taker.body, { x: tx, y: ty });
+    this.matter.body.setVelocity(taker.body, { x: 0, y: 0 });
   }
 
   private resetPossessionTouches(): void {
@@ -742,6 +804,8 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private ballDeadFrames = 0;
+  /** Time que bate a bola parada (lateral/escanteio/tiro de meta) quando a jogada assentar. */
+  private restartAwardedTo: TeamSide | null = null;
 
   private onGoal(scorer: TeamSide): void {
     this.score[scorer] += 1;
@@ -808,7 +872,12 @@ export class MatchScene extends Phaser.Scene {
    * dentro dos limites de TOUCH_RULES) ou se ela passa pro adversário.
    */
   private resolvePossession(): void {
-    if (!this.keepsPossession()) {
+    if (this.restartAwardedTo) {
+      // Bola parada (lateral/escanteio/tiro de meta): a posse vai pra quem tem o direito.
+      this.turn = this.restartAwardedTo;
+      this.restartAwardedTo = null;
+      this.resetPossessionTouches();
+    } else if (!this.keepsPossession()) {
       this.turn = this.turn === 'home' ? 'away' : 'home';
       this.resetPossessionTouches();
     }
