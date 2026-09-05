@@ -96,6 +96,9 @@ export function buildSeedTeams(): Team[] {
     ],
     squad: makeSquad(s.short, s.short === 'BRA' ? BRASIL_POSITIONS : undefined),
     rating: s.rating,
+    // Brasil: laterais (3,4) e zagueiros (11,12); meias abertos (5,6) e volante (8) adiantado;
+    // pontas (7,9) e centroavante (10).
+    ...(s.short === 'BRA' ? { lineup: [1, 3, 11, 12, 4, 5, 8, 6, 7, 10, 9], advanced: [8] } : {}),
   }));
 }
 

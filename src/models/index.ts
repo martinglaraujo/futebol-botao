@@ -97,6 +97,8 @@ export interface Team {
   anthemRef?: AssetRef;   // hino (áudio local)
   celebrationId?: string; // id de animação de comemoração
   rating: number;         // 0..100 força geral (seed da IA e do sorteio)
+  lineup?: number[];      // camisas dos titulares na ordem das vagas do esquema padrão (linha a linha, de cima pra baixo)
+  advanced?: number[];    // camisas que ficam um pouco adiantadas da própria linha (ex.: volante)
 }
 
 // ------------------------------------------------------------

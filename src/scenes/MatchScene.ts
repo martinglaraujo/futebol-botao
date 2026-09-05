@@ -84,6 +84,12 @@ export class MatchScene extends Phaser.Scene {
     this.awayTeam = away;
     // A IA escolhe o próprio esquema tático (o jogador não mexe nele — ver FormationBar).
     this.formationId[RULES.CPU_SIDE] = this.chooseAiFormation();
+    // Escalação padrão do time do jogador (vagas do esquema padrão, na ordem definida no seed).
+    if (home.lineup) {
+      const byNumber = new Map(home.squad.map((p) => [p.number, p]));
+      const picked = home.lineup.map((n) => byNumber.get(n)).filter((p): p is Player => !!p);
+      if (picked.length === home.lineup.length) this.manualLineup = picked;
+    }
 
     this.matter.world.setBounds(0, 0, GAME.WIDTH, GAME.HEIGHT); // fallback
     this.cameras.main.setBackgroundColor(GAME.BG_COLOR);
@@ -470,7 +476,9 @@ export class MatchScene extends Phaser.Scene {
         if (!entry) continue; // vaga sem titular (time jogando com expulsão)
         const { player } = entry;
         const y = fieldTop + (span * (i + 1)) / (line.count + 1);
-        const button = new ButtonEntity(this, x, y, side, player, buttonColor);
+        // Camisas "adiantadas" (ex.: volante) ficam um pouco à frente da própria linha.
+        const forward = team.advanced?.includes(player.number) ? (side === 'home' ? 1 : -1) * 40 : 0;
+        const button = new ButtonEntity(this, x + forward, y, side, player, buttonColor);
         button.setYellowCards(this.yellowCounts[side].get(player.id) ?? 0);
         this.buttons.push(button);
       }
